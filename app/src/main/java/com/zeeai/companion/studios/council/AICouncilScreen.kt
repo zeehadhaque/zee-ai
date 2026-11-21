@@ -328,17 +328,17 @@ fun AICouncilScreen(
                 FilterChip(
                     selected = useHydrogen,
                     onClick = { useHydrogen = !useHydrogen },
-                    label = { Text("4 Hydrogen", fontSize = 11.sp) }
+                    label = { Text("⚡ Fast Pragmatist", fontSize = 11.sp) }
                 )
                 FilterChip(
                     selected = useCarbon,
                     onClick = { useCarbon = !useCarbon },
-                    label = { Text("4 Carbon", fontSize = 11.sp) }
+                    label = { Text("🧠 Flagship Strategist", fontSize = 11.sp) }
                 )
                 FilterChip(
                     selected = useFlashLite,
                     onClick = { useFlashLite = !useFlashLite },
-                    label = { Text("3.5 Lite", fontSize = 11.sp) }
+                    label = { Text("⚖️ Rapid Trade-offs", fontSize = 11.sp) }
                 )
             }
 
@@ -410,6 +410,13 @@ fun AICouncilScreen(
                         Text(if (synthesizing) "Synthesizing..." else "Synthesize Verdict", fontSize = 11.sp)
                     }
                 }
+            }
+
+            if (runningCouncil || synthesizing) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = ElectricBlue
+                )
             }
 
             if (statusText.isNotBlank()) {

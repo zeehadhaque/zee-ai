@@ -40,6 +40,8 @@ android/.gradle/
 
 # Android Studio Clean workspace
 .idea/
+.aistudio/
+.kotlin/
 *.iws
 *.iml
 *.ipr

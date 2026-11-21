@@ -79,8 +79,8 @@
     <!-- Gear Icon -->
     <circle cx="111" cy="20" r="6" fill="none" stroke="#60A5FA" stroke-width="1.4" />
     <text x="10" y="52" class="node-title">Gradle Engine</text>
-    <text x="10" y="70" class="node-sub">assembleRelease</text>
-    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">No-daemon</text>
+    <text x="10" y="70" class="node-sub">assembleDebug</text>
+    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">Auto-signed</text>
   </g>
 
   <!-- NODE 4: Apksigner -->
@@ -119,7 +119,7 @@
     <rect x="106" y="13" width="12" height="18" rx="2" fill="none" stroke="#34D399" stroke-width="1.4" />
     <circle cx="112" cy="27" r="1" fill="#34D399" />
     <text x="10" y="52" class="node-title">Device Install</text>
-    <text x="10" y="70" fill="#34D399" class="node-sub">Direct APK</text>
-    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">Scan &amp; Launch</text>
+    <text x="10" y="70" fill="#34D399" class="node-sub">zee-ai.apk</text>
+    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">Direct Phone APK</text>
   </g>
 </svg>

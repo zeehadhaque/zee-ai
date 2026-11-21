@@ -179,12 +179,12 @@ fun ResearchAndTrendsScreen(
                 FilterChip(
                     selected = mode == "research",
                     onClick = { mode = "research" },
-                    label = { Text("Deep Research", fontSize = 12.sp) }
+                    label = { Text("🔬 Deep Research", fontSize = 12.sp) }
                 )
                 FilterChip(
                     selected = mode == "trends",
                     onClick = { mode = "trends" },
-                    label = { Text("Trend Radar", fontSize = 12.sp) }
+                    label = { Text("📡 Trend Radar", fontSize = 12.sp) }
                 )
             }
 

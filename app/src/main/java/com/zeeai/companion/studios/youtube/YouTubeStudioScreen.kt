@@ -233,11 +233,11 @@ fun YouTubeStudioScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             listOf(
-                "overview" to "Channel",
-                "upload" to "AI Script & Upload",
-                "comments" to "Comments",
-                "analytics" to "Real Analytics",
-                "queue" to "Offline Queue (${ytDrafts.size})"
+                "overview" to "📊 Channel",
+                "upload" to "🚀 SEO Package & Upload",
+                "comments" to "💬 Comments",
+                "analytics" to "📈 Analytics",
+                "queue" to "⏳ Offline Queue (${ytDrafts.size})"
             ).forEach { (id, label) ->
                 FilterChip(
                     selected = activeSubTab == id,

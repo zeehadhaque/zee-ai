@@ -540,7 +540,7 @@ fun FilmmakerStudioScreen(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(
-                        if (busy) "Directing Sequence..." else "Generate ${selectedModule.label}",
+                        if (busy) "Directing Sequence..." else "🎬 Generate ${selectedModule.label}",
                         fontSize = 12.sp
                     )
                 }
@@ -556,6 +556,13 @@ fun FilmmakerStudioScreen(
                         Text("Stop", color = CrimsonRed, fontSize = 12.sp)
                     }
                 }
+            }
+
+            if (busy) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = ElectricBlue
+                )
             }
 
             if (statusText.isNotBlank()) {
@@ -594,7 +601,7 @@ fun FilmmakerStudioScreen(
                             Toast.makeText(context, "Copied prompts to clipboard!", Toast.LENGTH_SHORT).show()
                         }
                     ) {
-                        Text("Copy", fontSize = 11.sp)
+                        Text("📋 Copy Prompts", fontSize = 11.sp)
                     }
 
                     OutlinedButton(
@@ -613,7 +620,7 @@ fun FilmmakerStudioScreen(
                             }
                         }
                     ) {
-                        Text("Save Memory", fontSize = 11.sp)
+                        Text("💾 Save Memory", fontSize = 11.sp)
                     }
 
                     Button(
@@ -626,7 +633,7 @@ fun FilmmakerStudioScreen(
                             exportLauncher.launch("$safeName-${selectedModule.id}.md")
                         }
                     ) {
-                        Text("Export", fontSize = 11.sp)
+                        Text("📥 Export (.md)", fontSize = 11.sp)
                     }
                 }
             }

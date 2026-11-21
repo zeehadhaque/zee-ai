@@ -115,10 +115,10 @@
     <!-- Clapperboard Icon -->
     <path d="M 25 33 L 43 33 L 43 49 L 25 49 Z M 25 33 L 28 27 L 43 27 L 40 33 Z M 32 27 L 35 33 M 38 27 L 41 33" 
           fill="none" stroke="#C084FC" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-    <text x="68" y="30" class="card-title">Filmmaker &amp; Narrative Studio</text>
+    <text x="68" y="30" class="card-title">ZEE Cinema &amp; Video Gen</text>
     <rect x="68" y="38" width="180" height="17" rx="3.5" fill="#1E293B" />
-    <text x="74" y="50" fill="#C084FC" class="card-badge">Native Canvas • Storyboard Engine</text>
-    <text x="68" y="70" class="card-desc">Scene script breakdown, shot deck lighting and visual design.</text>
+    <text x="74" y="50" fill="#C084FC" class="card-badge">Veo 2 • Sora • Face ID Lock</text>
+    <text x="68" y="70" class="card-desc">Scene video prompts, zero-morphing face lock &amp; 3-point lighting.</text>
   </g>
 
   <!-- ROW 3, COL 2: YouTube Studio Engine -->

@@ -364,17 +364,18 @@ fun ZeeNativeApp(
                         Spacer(Modifier.height(8.dp))
 
                         listOf(
-                            "companion" to "ZEE / ZHEE Companion",
-                            "council" to "AI Council (Multi-Model)",
-                            "youtube" to "YouTube Automation Studio",
-                            "filmmaker" to "ZEE Cinema & Filmmaker",
-                            "research" to "Research & Trend Radar",
-                            "reader" to "Universal File Reader (SAF)",
-                            "memory" to "Long-Term Room Memory",
-                            "models" to "Offline Model Store & Control",
-                            "settings" to "API Keys & Keystore Vault"
-                        ).forEach { (id, title) ->
+                            Triple("companion", "ZEE / ZHEE Companion", "🎙️"),
+                            Triple("council", "AI Council (Multi-Model)", "⚖️"),
+                            Triple("youtube", "YouTube Automation Studio", "📺"),
+                            Triple("filmmaker", "ZEE Cinema & Video Gen", "🎬"),
+                            Triple("research", "Research & Trend Radar", "📡"),
+                            Triple("reader", "Universal File Reader (SAF)", "📂"),
+                            Triple("memory", "Long-Term Room Memory", "💾"),
+                            Triple("models", "Offline Model Store & Control", "🧠"),
+                            Triple("settings", "API Keys & Keystore Vault", "⚙️")
+                        ).forEach { (id, title, iconEmoji) ->
                             NavigationDrawerItem(
+                                icon = { Text(iconEmoji, fontSize = 16.sp) },
                                 label = { Text(title, fontSize = 13.sp) },
                                 selected = activeTab == id,
                                 onClick = {
@@ -398,25 +399,24 @@ fun ZeeNativeApp(
                 bottomBar = {
                     NavigationBar(containerColor = CardSurface) {
                         listOf(
-                            "companion" to "ZEE/ZHEE",
-                            "youtube" to "YouTube",
-                            "filmmaker" to "Filmmaker",
-                            "research" to "Research",
-                            "models" to "Models"
-                        ).forEach { (id, label) ->
+                            Triple("companion", "ZEE/ZHEE", "🎙️"),
+                            Triple("youtube", "YouTube", "📺"),
+                            Triple("filmmaker", "Cinema", "🎬"),
+                            Triple("research", "Research", "📡"),
+                            Triple("models", "Models", "🧠")
+                        ).forEach { (id, label, iconEmoji) ->
                             NavigationBarItem(
                                 selected = activeTab == id,
                                 onClick = { activeTab = id },
-                                label = { Text(label, fontSize = 11.sp) },
-                                icon = {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .background(
-                                                if (activeTab == id) ElectricBlue else Silver.copy(alpha = 0.3f),
-                                                CircleShape
-                                            )
+                                label = {
+                                    Text(
+                                        label,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (activeTab == id) FontWeight.Bold else FontWeight.Normal
                                     )
+                                },
+                                icon = {
+                                    Text(iconEmoji, fontSize = if (activeTab == id) 18.sp else 16.sp)
                                 }
                             )
                         }
@@ -504,12 +504,12 @@ fun ZeeNativeApp(
                                 FilterChip(
                                     selected = activeCharId == "zee",
                                     onClick = { activeCharId = "zee" },
-                                    label = { Text("ZEE (Male)") }
+                                    label = { Text("⚔️ ZEE (Male)", fontSize = 12.sp) }
                                 )
                                 FilterChip(
                                     selected = activeCharId == "zhee",
                                     onClick = { activeCharId = "zhee" },
-                                    label = { Text("ZHEE (Female)") }
+                                    label = { Text("🌸 ZHEE (Female)", fontSize = 12.sp) }
                                 )
                                 Spacer(Modifier.weight(1f))
                                 FilterChip(
@@ -523,12 +523,12 @@ fun ZeeNativeApp(
                                             micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                         }
                                     },
-                                    label = { Text(if (wakeWordRunning) "Wake: ON" else "Wake: OFF", fontSize = 11.sp) }
+                                    label = { Text(if (wakeWordRunning) "🎙️ Wake: ON" else "🎙️ Wake: OFF", fontSize = 11.sp) }
                                 )
                                 FilterChip(
                                     selected = autoSpeak,
                                     onClick = { autoSpeak = !autoSpeak },
-                                    label = { Text(if (autoSpeak) "Voice ON" else "Muted", fontSize = 11.sp) }
+                                    label = { Text(if (autoSpeak) "🔊 TTS: ON" else "🔇 Muted", fontSize = 11.sp) }
                                 )
                             }
 

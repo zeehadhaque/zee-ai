@@ -113,14 +113,6 @@ When disconnected from the internet and with no downloaded weights, ZEE and ZHEE
 
 ---
 
-### 🎨 4. Obsidian Noir Adaptive Icon & In-App Brand Emblem
-- **Geometric Monogram:** Center-split "Z" forged with dark brushed titanium and an electric cobalt-cyan (`#00F0FF` -> `#2F80FF`) diagonal plasma energy slash.
-- **Architectural Lighting:** Fine cinema camera aperture rim arcs, subtle ambient core bloom, and horizontal anamorphic lens flare.
-- **Material You Support:** Includes `ic_launcher_monochrome.xml` for Android 13/14/15 themed launcher icons.
-- **In-App Branding:** Matching circular dark glass badge with glowing cyan rim in top app bar and drawer header.
-
----
-
 ## 🛠️ Complete Native Studio Matrix
 
 | Studio Console | Core Engine & Protocols | Native Capabilities |

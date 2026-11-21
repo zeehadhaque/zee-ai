@@ -1,5 +1,9 @@
 package com.zeeai.companion.studios.reader
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -23,6 +27,7 @@ import com.zeeai.companion.data.local.SecureKeyVault
 import com.zeeai.companion.offline.LocalLlmInferenceEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val BgNavy = Color(0xFF060913)
 private val CardNavy = Color(0xFF0B1120)
@@ -71,6 +76,28 @@ fun UniversalReaderScreen(
             val parsed = AndroidFileParser.parseUri(context, uri)
             compareFile = parsed
             statusText = "Loaded comparison file: ${parsed.displayName}"
+        }
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(outputText.toByteArray(Charsets.UTF_8))
+                }
+            }.onSuccess {
+                withContext(Dispatchers.Main) {
+                    statusText = "Exported cleanly to phone storage."
+                    Toast.makeText(context, "Saved to device storage!", Toast.LENGTH_SHORT).show()
+                }
+            }.onFailure { err ->
+                withContext(Dispatchers.Main) {
+                    statusText = "Export failed: ${err.message}"
+                }
+            }
         }
     }
 
@@ -226,13 +253,13 @@ fun UniversalReaderScreen(
                     onClick = { pickPrimaryLauncher.launch(arrayOf("*/*")) },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(if (primaryFile == null) "Pick File" else "Change File", fontSize = 12.sp)
+                    Text(if (primaryFile == null) "📁 Pick File" else "📁 Change File", fontSize = 12.sp)
                 }
                 OutlinedButton(
                     onClick = { pickCompareLauncher.launch(arrayOf("*/*")) },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(if (compareFile == null) "+ Compare File" else "Change File B", fontSize = 12.sp)
+                    Text(if (compareFile == null) "+ 📑 Compare File" else "📑 Change File B", fontSize = 12.sp)
                 }
             }
 
@@ -272,12 +299,12 @@ fun UniversalReaderScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 listOf(
-                    "summary" to "Summarize",
-                    "extract" to "Extract Info",
-                    "notes" to "Study Notes",
-                    "transcribe" to "Transcribe Audio/Video",
-                    "subtitles" to "Subtitle Analysis",
-                    "compare" to "Compare A vs B"
+                    "summary" to "📝 Summarize",
+                    "extract" to "🔍 Extract Info",
+                    "notes" to "📚 Study Notes",
+                    "transcribe" to "🎙️ Transcribe",
+                    "subtitles" to "💬 Subtitles",
+                    "compare" to "⚖️ Compare A vs B"
                 ).forEach { (id, label) ->
                     Button(
                         enabled = primaryFile != null && !busy && (id != "compare" || compareFile != null),
@@ -365,7 +392,40 @@ fun UniversalReaderScreen(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Reader Output", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Reader Output", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        enabled = outputText.isNotBlank(),
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText("ZEE Universal Reader Output", outputText)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "Copied analysis to clipboard!", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Text("📋 Copy", fontSize = 11.sp)
+                    }
+
+                    Button(
+                        enabled = outputText.isNotBlank(),
+                        onClick = {
+                            val safeName = primaryFile?.displayName
+                                ?.substringBeforeLast(".")
+                                ?.lowercase()
+                                ?.replace(Regex("[^a-z0-9]+"), "-")
+                                ?: "zee-reader"
+                            exportLauncher.launch("$safeName-analysis.md")
+                        }
+                    ) {
+                        Text("📥 Export (.md)", fontSize = 11.sp)
+                    }
+                }
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
