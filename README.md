@@ -65,7 +65,25 @@ Most modern "AI mobile apps" are thin web wrappers: React Native bundles, Electr
 
 ---
 
-## Project Structure (`com.zeeai.companion`)
+## Modular Architecture & Package Structure (`com.zeeai.companion`)
+
+<p align="center">
+  <img src="assets/architecture-map.svg" alt="ZEE AI Modular Clean Architecture" width="100%" />
+</p>
+
+| Package / Domain | Architectural Responsibilities | Key Native Implementations |
+| :--- | :--- | :--- |
+| **`accessibility/`** | Native OS control, live UI node inspection, programmatic gestures | `ZeeAccessibilityService`, `ActionExecutor`, `UIHierarchyScanner` |
+| **`ai/`** | Online Gemini streaming, on-device MediaPipe inference & AI Council | `GeminiClient`, `MediaPipeEngine`, `CouncilOrchestrator` |
+| **`persona/`** | Dual-core identity management (ZEE Operational vs. ZHEE Creative) | `PersonaManager`, `ZeePersona`, `ZheePersona` |
+| **`studio/`** | Filmmaker storyboards, YouTube Data API v3, Universal SAF reader | `StoryboardEngine`, `YouTubeClient`, `SafDocumentReader` |
+| **`voice/`** | Low-power hotword wake detection, PCM streams & persona TTS | `HotwordDetector`, `VoiceRecorder`, `SpeechSynthesizer` |
+| **`data/`** | Persistent Room DB state, conversation memory & Android Keystore | `ZeeDatabase`, `MemoryDao`, `ConversationEntity` |
+| **`ui/`** | 100% Jetpack Compose single-activity interface & obsidian components | `theme/`, `components/`, `screens/`, `MainActivity` |
+
+<details>
+<summary><b>📂 Expand Complete Directory Tree (.kt / .xml / .kts)</b></summary>
+<br/>
 
 ```text
 zee-ai/
@@ -120,12 +138,15 @@ zee-ai/
 │   ├── hero-banner.svg                          # Keyframe animated Obsidian Noir SVG banner
 │   ├── persona-status.svg                       # Live dual-persona state indicator
 │   ├── feature-matrix.svg                       # Visual capabilities matrix with vector cards
+│   ├── architecture-map.svg                     # Vector architectural tiers & modular packages
 │   ├── pipeline.svg                             # Animated cloud APK build & CI/CD pipeline
 │   ├── install-guide.svg                        # Step-by-step phone onboarding cards
 │   └── security-grid.svg                        # Zero telemetry & biometric security badges
 ├── build.gradle.kts                             # Top-level Gradle script
 └── settings.gradle.kts
 ```
+
+</details>
 
 ---
 
