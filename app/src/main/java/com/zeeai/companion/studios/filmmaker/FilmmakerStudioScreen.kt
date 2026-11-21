@@ -138,10 +138,11 @@ fun FilmmakerStudioScreen(
 
         scope.launch {
             val apiKey = keyVault.getKey("gemini_api_key")
+            val proModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" }
             if (isOnline() && apiKey.isNotBlank()) {
                 val result = geminiClient.streamChat(
                     apiKey = apiKey,
-                    model = "gemini-2.5-pro",
+                    model = proModel,
                     systemInstruction = sysInstruction,
                     history = emptyList(),
                     userPrompt = prompt,
@@ -149,7 +150,7 @@ fun FilmmakerStudioScreen(
                 )
                 result.onSuccess {
                     output = it
-                    statusText = "Generated online via Gemini 2.5 Pro."
+                    statusText = "Generated online via $proModel."
                 }.onFailure {
                     statusText = "Gemini error: ${it.message}"
                 }

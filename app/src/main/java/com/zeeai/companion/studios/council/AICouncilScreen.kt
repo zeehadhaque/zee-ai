@@ -132,14 +132,17 @@ fun AICouncilScreen(
         }
 
         val geminiKey = keyVault.getKey("gemini_api_key")
+        val proModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" }
+        val flashModel = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
+
         val tasks = mutableListOf<Triple<String, String, suspend () -> Result<String>>>()
 
         if (useHydrogen && geminiKey.isNotBlank()) {
             tasks.add(
-                Triple("gemini-4-hydrogen", "Gemini 4 Hydrogen • Fast Pragmatist") {
+                Triple(flashModel, "$flashModel • Fast Pragmatist") {
                     geminiClient.generateOnce(
                         apiKey = geminiKey,
-                        model = "gemini-4-hydrogen",
+                        model = flashModel,
                         systemInstruction = "Give a crisp, practical, directly actionable answer.",
                         userPrompt = question
                     )
@@ -148,10 +151,10 @@ fun AICouncilScreen(
         }
         if (useCarbon && geminiKey.isNotBlank()) {
             tasks.add(
-                Triple("gemini-4-carbon", "Gemini 4 Carbon • Flagship Strategist") {
+                Triple(proModel, "$proModel • Flagship Strategist") {
                     geminiClient.generateOnce(
                         apiKey = geminiKey,
-                        model = "gemini-4-carbon",
+                        model = proModel,
                         systemInstruction = "Give a deeply reasoned, critical, edge-case-aware strategic analysis.",
                         userPrompt = question
                     )
@@ -160,10 +163,10 @@ fun AICouncilScreen(
         }
         if (useFlashLite && geminiKey.isNotBlank()) {
             tasks.add(
-                Triple("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite • Rapid Check") {
+                Triple(flashModel, "$flashModel • Rapid Check") {
                     geminiClient.generateOnce(
                         apiKey = geminiKey,
-                        model = "gemini-3.5-flash-lite",
+                        model = flashModel,
                         systemInstruction = "Provide the tightest high-signal summary and key trade-offs.",
                         userPrompt = question
                     )
@@ -257,7 +260,8 @@ fun AICouncilScreen(
 
         synthesizing = true
         verdictText = ""
-        statusText = "Synthesizing comparison & final verdict with Gemini 4 Carbon..."
+        val proModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" }
+        statusText = "Synthesizing comparison & final verdict with $proModel..."
 
         val comparisonPayload = successful.mapIndexed { i, m ->
             "### Model ${i + 1}: ${m.displayName} (${m.roleTag}, ${m.latencyMs} ms)\n${m.text}"
@@ -266,7 +270,7 @@ fun AICouncilScreen(
         scope.launch {
             val res = geminiClient.streamChat(
                 apiKey = geminiKey,
-                model = "gemini-4-carbon",
+                model = proModel,
                 systemInstruction = "You are the Chair of ZEE AI Council. Output: 1) Strength & Weakness comparison per model, 2) Best Individual Answer (with why), and 3) Unified Combined Final Answer taking the strongest insights from all models.",
                 history = emptyList(),
                 userPrompt = "Original Question: \"${prompt.trim()}\"\n\nResponses:\n$comparisonPayload",

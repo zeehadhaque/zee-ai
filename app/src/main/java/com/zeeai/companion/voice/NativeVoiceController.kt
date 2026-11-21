@@ -2,6 +2,8 @@ package com.zeeai.companion.voice
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -51,9 +53,16 @@ class NativeVoiceController(
         onSpeakingStateChanged(false)
     }
 
+    private fun isNetworkAvailable(): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val net = cm?.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(net) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
     fun startListening(
         languageTag: String,
-        preferOffline: Boolean,
+        preferOffline: Boolean = false,
         onPartial: (String) -> Unit,
         onFinal: (String) -> Unit,
         onError: (String) -> Unit
@@ -61,7 +70,11 @@ class NativeVoiceController(
         stopSpeaking() // Barge-in: stop AI voice when user starts speaking
         stopListening()
 
+        // Seamless mic handoff: pause wake word background detection while active listening is engaged
+        WakeWordForegroundService.pause(context)
+
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            WakeWordForegroundService.resume(context)
             onError("Android Speech Recognition service not available on this device.")
             return
         }
@@ -75,10 +88,12 @@ class NativeVoiceController(
             override fun onEndOfSpeech() {}
 
             override fun onError(error: Int) {
+                WakeWordForegroundService.resume(context)
                 onError("Voice recognition error code: $error")
             }
 
             override fun onResults(results: Bundle?) {
+                WakeWordForegroundService.resume(context)
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
                     .orEmpty()
@@ -95,11 +110,14 @@ class NativeVoiceController(
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
+        val shouldPreferOffline = preferOffline || !isNetworkAvailable()
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, shouldPreferOffline)
+            putExtra("android.speech.extra.DICTATION_MODE", true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
 
         recognizer = sr
@@ -110,6 +128,7 @@ class NativeVoiceController(
         recognizer?.stopListening()
         recognizer?.destroy()
         recognizer = null
+        WakeWordForegroundService.resume(context)
     }
 
     fun emergencyStop() {

@@ -23,6 +23,10 @@ class SecureKeyVault(context: Context) {
 
     fun getKey(name: String): String = prefs.getString(name, "") ?: ""
 
+    fun removeKey(name: String) {
+        prefs.edit().remove(name).apply()
+    }
+
     fun clearAll() {
         prefs.edit().clear().apply()
     }

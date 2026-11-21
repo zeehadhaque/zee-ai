@@ -38,6 +38,19 @@ data class GroundedStreamResult(
     val searchQueries: List<String>
 )
 
+data class DiscoveredModel(
+    val id: String,
+    val displayName: String,
+    val description: String,
+    val supportedGenerationMethods: List<String>
+)
+
+data class ModelDiscoveryResult(
+    val models: List<DiscoveredModel>,
+    val bestFlashModel: String,
+    val bestProModel: String
+)
+
 class GeminiNativeClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(25, TimeUnit.SECONDS)
@@ -50,6 +63,74 @@ class GeminiNativeClient {
     fun cancelActive() {
         activeCall?.cancel()
         activeCall = null
+    }
+
+    suspend fun discoverModels(apiKey: String): Result<ModelDiscoveryResult> = withContext(Dispatchers.IO) {
+        val cleanKey = apiKey.trim()
+        if (cleanKey.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Google AI Studio API key is blank."))
+        }
+
+        val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$cleanKey"
+        val request = Request.Builder().url(url).get().build()
+
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val err = response.body?.string()?.take(250) ?: "HTTP ${response.code}"
+                    return@withContext Result.failure(
+                        IllegalStateException("Invalid API key or network error (${response.code}): $err")
+                    )
+                }
+
+                val jsonBody = response.body?.string()
+                    ?: return@withContext Result.failure(IllegalStateException("Empty response from Google AI Studio."))
+                val root = JSONObject(jsonBody)
+                val modelsArray = root.optJSONArray("models") ?: JSONArray()
+
+                val discoveredList = mutableListOf<DiscoveredModel>()
+                for (i in 0 until modelsArray.length()) {
+                    val mObj = modelsArray.optJSONObject(i) ?: continue
+                    val rawName = mObj.optString("name", "")
+                    val id = if (rawName.startsWith("models/")) rawName.removePrefix("models/") else rawName
+                    val displayName = mObj.optString("displayName", id)
+                    val description = mObj.optString("description", "")
+                    val methodsArray = mObj.optJSONArray("supportedGenerationMethods")
+                    val methods = mutableListOf<String>()
+                    if (methodsArray != null) {
+                        for (j in 0 until methodsArray.length()) {
+                            methods.add(methodsArray.optString(j))
+                        }
+                    }
+
+                    if (methods.contains("generateContent")) {
+                        discoveredList.add(DiscoveredModel(id, displayName, description, methods))
+                    }
+                }
+
+                if (discoveredList.isEmpty()) {
+                    return@withContext Result.failure(IllegalStateException("No content generation models found for this API key."))
+                }
+
+                // Auto-select best Pro and Flash models
+                val proCandidates = discoveredList.filter { it.id.contains("pro", ignoreCase = true) }
+                val bestPro = proCandidates.firstOrNull { it.id.contains("2.5", ignoreCase = true) }?.id
+                    ?: proCandidates.firstOrNull { it.id.contains("2.0", ignoreCase = true) }?.id
+                    ?: proCandidates.firstOrNull()?.id
+                    ?: discoveredList.firstOrNull { !it.id.contains("flash", ignoreCase = true) }?.id
+                    ?: discoveredList.first().id
+
+                val flashCandidates = discoveredList.filter { it.id.contains("flash", ignoreCase = true) }
+                val bestFlash = flashCandidates.firstOrNull { it.id.contains("2.5", ignoreCase = true) }?.id
+                    ?: flashCandidates.firstOrNull { it.id.contains("2.0", ignoreCase = true) }?.id
+                    ?: flashCandidates.firstOrNull()?.id
+                    ?: discoveredList.first().id
+
+                Result.success(ModelDiscoveryResult(discoveredList, bestFlash, bestPro))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun streamChat(
@@ -152,7 +233,7 @@ class GeminiNativeClient {
 
     suspend fun streamGrounded(
         apiKey: String,
-        model: String = "gemini-4-hydrogen",
+        model: String = "gemini-2.5-pro",
         systemInstruction: String,
         userPrompt: String,
         onChunk: (accumulatedText: String, citations: List<GroundedCitation>, queries: List<String>) -> Unit

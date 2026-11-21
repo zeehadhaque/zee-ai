@@ -183,6 +183,7 @@ fun ZeeNativeApp(
 
             val online = isNetworkAvailable()
             val geminiKey = keyVault.getKey("gemini_api_key")
+            val savedFlash = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
 
             if (online && geminiKey.isNotBlank()) {
                 val historyPairs = messages.takeLast(10).map {
@@ -190,6 +191,7 @@ fun ZeeNativeApp(
                 }
                 val res = geminiClient.streamChat(
                     apiKey = geminiKey,
+                    model = savedFlash,
                     systemInstruction = sysPrompt,
                     history = historyPairs,
                     userPrompt = prompt,
@@ -740,30 +742,209 @@ fun ZeeNativeApp(
 
                     "settings" -> {
                         var geminiInput by remember { mutableStateOf(keyVault.getKey("gemini_api_key")) }
-                        var savedNote by remember { mutableStateOf("") }
+                        var statusMsg by remember { mutableStateOf(keyVault.getKey("gemini_status_msg")) }
+                        var isVerified by remember { mutableStateOf(keyVault.getKey("gemini_api_status") == "verified") }
+                        var isValidating by remember { mutableStateOf(false) }
+
+                        val storedModels = keyVault.getKey("gemini_discovered_models").split(",").filter { it.isNotBlank() }
+                        var discoveredModels by remember { mutableStateOf(storedModels) }
+                        var selectedFlash by remember {
+                            mutableStateOf(keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" })
+                        }
+                        var selectedPro by remember {
+                            mutableStateOf(keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" })
+                        }
+                        var flashDropdownOpen by remember { mutableStateOf(false) }
+                        var proDropdownOpen by remember { mutableStateOf(false) }
+
+                        val runLiveValidation: (String) -> Unit = { keyToValidate ->
+                            val clean = keyToValidate.trim()
+                            if (clean.isNotBlank()) {
+                                isValidating = true
+                                statusMsg = "Connecting to Google AI Studio..."
+                                scope.launch {
+                                    val res = geminiClient.discoverModels(clean)
+                                    isValidating = false
+                                    res.onSuccess { disc ->
+                                        isVerified = true
+                                        statusMsg = "API Key Verified • ${disc.models.size} models detected"
+                                        discoveredModels = disc.models.map { it.id }
+                                        selectedFlash = disc.bestFlashModel
+                                        selectedPro = disc.bestProModel
+
+                                        keyVault.saveKey("gemini_api_key", clean)
+                                        keyVault.saveKey("gemini_api_status", "verified")
+                                        keyVault.saveKey("gemini_status_msg", statusMsg)
+                                        keyVault.saveKey("gemini_discovered_models", discoveredModels.joinToString(","))
+                                        keyVault.saveKey("gemini_flash_model", selectedFlash)
+                                        keyVault.saveKey("gemini_pro_model", selectedPro)
+                                    }.onFailure { err ->
+                                        isVerified = false
+                                        statusMsg = "Validation failed: ${err.message?.take(120)}"
+                                        keyVault.saveKey("gemini_api_status", "invalid")
+                                        keyVault.saveKey("gemini_status_msg", statusMsg)
+                                    }
+                                }
+                            }
+                        }
+
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(CardSurface, RoundedCornerShape(16.dp))
                                 .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            Text("Gemini API Configuration (API Key Only)", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Google AI Studio API Key & Live Model Discovery",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                "Paste your Google AI Studio API key (AIza...). The key is validated live and modern models are auto-detected without deprecated IDs.",
+                                color = Silver,
+                                fontSize = 12.sp
+                            )
+
                             OutlinedTextField(
                                 value = geminiInput,
-                                onValueChange = { geminiInput = it },
+                                onValueChange = { newVal ->
+                                    geminiInput = newVal
+                                    if (newVal.trim().startsWith("AIza") && newVal.trim().length >= 39) {
+                                        runLiveValidation(newVal)
+                                    }
+                                },
                                 visualTransformation = PasswordVisualTransformation(),
-                                placeholder = { Text("Paste Google AI Studio API Key (AIza...)") },
+                                placeholder = { Text("AIzaSy...") },
+                                label = { Text("Google AI Studio API Key") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true
                             )
-                            Button(onClick = {
-                                keyVault.saveKey("gemini_api_key", geminiInput)
-                                savedNote = "Encrypted & saved in Android Keystore."
-                            }) { Text("Save Key") }
-                            if (savedNote.isNotEmpty()) {
-                                Text(savedNote, color = Color(0xFF34D399), fontSize = 12.sp)
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    onClick = { runLiveValidation(geminiInput) },
+                                    enabled = !isValidating && geminiInput.isNotBlank()
+                                ) {
+                                    if (isValidating) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = Color.White,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Validating...")
+                                    } else {
+                                        Text("Validate & Discover")
+                                    }
+                                }
+
+                                if (isVerified) {
+                                    TextButton(onClick = {
+                                        geminiInput = ""
+                                        isVerified = false
+                                        statusMsg = ""
+                                        discoveredModels = emptyList()
+                                        keyVault.removeKey("gemini_api_key")
+                                        keyVault.removeKey("gemini_api_status")
+                                        keyVault.removeKey("gemini_status_msg")
+                                        keyVault.removeKey("gemini_discovered_models")
+                                    }) {
+                                        Text("Clear Key", color = Color(0xFFEF4444))
+                                    }
+                                }
                             }
+
+                            if (statusMsg.isNotBlank()) {
+                                val badgeBg = if (isVerified) Color(0xFF064E3B) else Color(0xFF7F1D1D)
+                                val badgeFg = if (isVerified) Color(0xFF34D399) else Color(0xFFFCA5A5)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(badgeBg, RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = (if (isVerified) "● " else "▲ ") + statusMsg,
+                                        color = badgeFg,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            if (discoveredModels.isNotEmpty()) {
+                                HorizontalDivider(color = Color(0xFF1E293B))
+
+                                Text("Active Model Selectors", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { flashDropdownOpen = true },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                                            Text("Fast Model (Voice & Companion Chat)", fontSize = 11.sp, color = Silver)
+                                            Text(selectedFlash, fontSize = 14.sp, color = ElectricBlue, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = flashDropdownOpen,
+                                        onDismissRequest = { flashDropdownOpen = false }
+                                    ) {
+                                        discoveredModels.filter { it.contains("flash", ignoreCase = true) || !it.contains("pro", ignoreCase = true) }.forEach { modelId ->
+                                            DropdownMenuItem(
+                                                text = { Text(modelId) },
+                                                onClick = {
+                                                    selectedFlash = modelId
+                                                    keyVault.saveKey("gemini_flash_model", modelId)
+                                                    flashDropdownOpen = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { proDropdownOpen = true },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                                            Text("Pro Model (Filmmaker, Research & Council)", fontSize = 11.sp, color = Silver)
+                                            Text(selectedPro, fontSize = 14.sp, color = Color(0xFFA78BFA), fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = proDropdownOpen,
+                                        onDismissRequest = { proDropdownOpen = false }
+                                    ) {
+                                        discoveredModels.filter { it.contains("pro", ignoreCase = true) || !it.contains("flash", ignoreCase = true) }.forEach { modelId ->
+                                            DropdownMenuItem(
+                                                text = { Text(modelId) },
+                                                onClick = {
+                                                    selectedPro = modelId
+                                                    keyVault.saveKey("gemini_pro_model", modelId)
+                                                    proDropdownOpen = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(color = Color(0xFF1E293B))
+                            Text("Hardware Keystore Security", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                            Text(
+                                "All API keys and OAuth tokens are AES-256 GCM encrypted inside the Android hardware Keystore. Zero telemetry or unencrypted network egress.",
+                                color = Silver,
+                                fontSize = 11.sp
+                            )
                         }
                     }
                 }

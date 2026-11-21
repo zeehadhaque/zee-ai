@@ -117,6 +117,7 @@ fun UniversalReaderScreen(
                     promptBuilder.append(compareFile!!.extractedText!!.take(40_000))
                 }
 
+                val flashModel = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
                 val isMultimodalBinary = file.kind == NativeFileKind.MULTIMODAL
                 val res = geminiClient.streamMultimodal(
                     apiKey = apiKey,
@@ -124,7 +125,7 @@ fun UniversalReaderScreen(
                     fileUri = if (isMultimodalBinary) file.uri else null,
                     mimeType = if (isMultimodalBinary) file.mimeType else null,
                     fileSizeBytes = file.sizeBytes,
-                    model = "gemini-2.5-flash",
+                    model = flashModel,
                     systemInstruction = sysInstruction,
                     prompt = promptBuilder.toString(),
                     onStatus = { s ->
