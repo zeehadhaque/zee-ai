@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">ZEE AI</string>
+    <string name="zee_accessibility_description">Allows ZEE AI to read visible screen text and run voice-triggered navigation when you explicitly request it. Password fields are always excluded.</string>
+</resources>
