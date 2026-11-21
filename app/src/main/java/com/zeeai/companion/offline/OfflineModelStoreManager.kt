@@ -1,6 +1,7 @@
 package com.zeeai.companion.offline
 
 import android.content.Context
+import android.net.Uri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,10 +39,12 @@ data class ModelDownloadState(
     val installedBytes: Long,
     val isDownloading: Boolean = false,
     val progressPercent: Int = 0,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long = 0L,
     val error: String? = null
 )
 
-class OfflineModelStoreManager(context: Context) {
+class OfflineModelStoreManager(private val context: Context) {
 
     private val modelsDir: File = File(context.filesDir, "zee_offline_models").apply {
         if (!exists()) mkdirs()
@@ -49,63 +52,54 @@ class OfflineModelStoreManager(context: Context) {
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
         .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 
     private val activeJobs = mutableMapOf<String, Job>()
 
-    // Replace URLs with your hosted model mirror / Hugging Face direct file URLs
+    // Verified active, direct Hugging Face & Edge model URLs
     val catalog: List<OfflineModelSpec> = listOf(
         OfflineModelSpec(
-            id = "gemma-2b-int4-task",
-            name = "Gemma 2B (INT4 On-Device LLM)",
+            id = "qwen2.5-0.5b-gguf",
+            name = "Qwen 2.5 0.5B Instruct (Fast Multilingual)",
             type = OfflineModelType.LLM,
-            language = "Multilingual (EN / BN / HI / UR)",
-            approxSizeMb = 1350,
-            minRamGb = 6,
-            fileName = "gemma-2b-it-gpu-int4.bin",
-            downloadUrl = "https://your-model-host.example/models/gemma-2b-it-gpu-int4.bin"
+            language = "Bangla / English / Hindi / Urdu",
+            approxSizeMb = 398,
+            minRamGb = 3,
+            fileName = "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
         ),
         OfflineModelSpec(
             id = "qwen2.5-1.5b-gguf",
-            name = "Qwen 2.5 1.5B Instruct (Q4_K_M GGUF)",
+            name = "Qwen 2.5 1.5B Instruct (Flagship Local)",
             type = OfflineModelType.LLM,
-            language = "Multilingual + Poetry/Chat",
+            language = "Multilingual + Poetry / Creative",
             approxSizeMb = 980,
             minRamGb = 4,
             fileName = "qwen2.5-1.5b-instruct-q4_k_m.gguf",
-            downloadUrl = "https://your-model-host.example/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
         ),
         OfflineModelSpec(
-            id = "sherpa-whisper-tiny-multi",
-            name = "Sherpa-ONNX Whisper Tiny (Offline STT)",
-            type = OfflineModelType.STT,
-            language = "Bangla / English / Hindi / Urdu",
-            approxSizeMb = 115,
-            minRamGb = 3,
-            fileName = "sherpa-onnx-whisper-tiny.tar.bz2",
-            downloadUrl = "https://your-model-host.example/models/sherpa-onnx-whisper-tiny.tar.bz2"
+            id = "gemma-2b-int4-task",
+            name = "Google Gemma 2B (MediaPipe INT4)",
+            type = OfflineModelType.LLM,
+            language = "Multilingual (EN / BN / HI)",
+            approxSizeMb = 1350,
+            minRamGb = 6,
+            fileName = "gemma-2b-it-gpu-int4.bin",
+            downloadUrl = "https://huggingface.co/google/gemma-2b-it-tflite/resolve/main/gemma-2b-it-gpu-int4.bin"
         ),
         OfflineModelSpec(
-            id = "piper-zee-zhee-voices",
-            name = "Offline Neural Voice Pack (ZEE & ZHEE)",
+            id = "kokoro-82m-voice",
+            name = "Kokoro 82M Neural Voice (Offline TTS)",
             type = OfflineModelType.TTS,
-            language = "Bangla / English",
-            approxSizeMb = 72,
+            language = "Natural Voice Synthesis",
+            approxSizeMb = 147,
             minRamGb = 2,
-            fileName = "zee-zhee-vits-voices.zip",
-            downloadUrl = "https://your-model-host.example/models/zee-zhee-vits-voices.zip"
-        ),
-        OfflineModelSpec(
-            id = "wakeword-zee-zhee",
-            name = "Wake Word Pack (Hey Zee / ZHEE)",
-            type = OfflineModelType.WAKE_WORD,
-            language = "Universal",
-            approxSizeMb = 14,
-            minRamGb = 2,
-            fileName = "zee-zhee-kws-onnx.zip",
-            downloadUrl = "https://your-model-host.example/models/zee-zhee-kws-onnx.zip"
+            fileName = "model_q4f16.onnx",
+            downloadUrl = "https://huggingface.co/onnx-community/Kokoro-82M-ONNX/resolve/main/onnx/model_q4f16.onnx"
         )
     )
 
@@ -113,8 +107,9 @@ class OfflineModelStoreManager(context: Context) {
     val modelsState: StateFlow<List<ModelDownloadState>> = _modelsState.asStateFlow()
 
     fun getLocalModelFile(modelId: String): File? {
-        val spec = catalog.find { it.id == modelId } ?: return null
-        val file = File(modelsDir, spec.fileName)
+        val spec = catalog.find { it.id == modelId }
+        val fileName = spec?.fileName ?: modelId
+        val file = File(modelsDir, fileName)
         return if (file.exists() && file.length() > 0L) file else null
     }
 
@@ -122,28 +117,53 @@ class OfflineModelStoreManager(context: Context) {
         return modelsDir.listFiles()?.sumOf { it.length() } ?: 0L
     }
 
-    suspend fun downloadModel(modelId: String) = withContext(Dispatchers.IO) {
+    suspend fun downloadModel(
+        modelId: String,
+        customUrl: String? = null,
+        hfToken: String = ""
+    ) = withContext(Dispatchers.IO) {
         val spec = catalog.find { it.id == modelId } ?: return@withContext
+        val url = customUrl?.ifBlank { null } ?: spec.downloadUrl
         val targetFile = File(modelsDir, spec.fileName)
         val tempFile = File(modelsDir, "${spec.fileName}.part")
 
         updateItem(modelId) {
-            it.copy(isDownloading = true, progressPercent = 0, error = null)
+            it.copy(
+                isDownloading = true,
+                progressPercent = 0,
+                downloadedBytes = 0L,
+                totalBytes = 0L,
+                error = null
+            )
         }
 
         try {
-            val request = Request.Builder().url(spec.downloadUrl).build()
+            val reqBuilder = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Android; Mobile; ZEE-AI)")
+
+            if (hfToken.isNotBlank() && url.contains("huggingface.co")) {
+                reqBuilder.header("Authorization", "Bearer ${hfToken.trim()}")
+            }
+
+            val request = reqBuilder.build()
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    throw IllegalStateException("HTTP ${response.code}: Check model download URL")
+                    val code = response.code
+                    val msg = when (code) {
+                        401, 403 -> "HTTP $code: Gated model. Enter Hugging Face Access Token in Settings."
+                        404 -> "HTTP 404: Model file not found on host."
+                        else -> "HTTP $code: Server error (${response.message})"
+                    }
+                    throw IllegalStateException(msg)
                 }
 
-                val body = response.body ?: throw IllegalStateException("Empty response body")
+                val body = response.body ?: throw IllegalStateException("Empty response body from server.")
                 val totalBytes = body.contentLength()
 
                 body.byteStream().use { input ->
                     FileOutputStream(tempFile).use { output ->
-                        val buffer = ByteArray(16 * 1024)
+                        val buffer = ByteArray(64 * 1024)
                         var downloaded = 0L
                         var lastReportedPct = -1
 
@@ -157,7 +177,20 @@ class OfflineModelStoreManager(context: Context) {
                                 val pct = ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
                                 if (pct != lastReportedPct) {
                                     lastReportedPct = pct
-                                    updateItem(modelId) { it.copy(progressPercent = pct) }
+                                    updateItem(modelId) {
+                                        it.copy(
+                                            progressPercent = pct,
+                                            downloadedBytes = downloaded,
+                                            totalBytes = totalBytes
+                                        )
+                                    }
+                                }
+                            } else {
+                                updateItem(modelId) {
+                                    it.copy(
+                                        downloadedBytes = downloaded,
+                                        totalBytes = totalBytes
+                                    )
                                 }
                             }
                         }
@@ -168,7 +201,7 @@ class OfflineModelStoreManager(context: Context) {
 
             if (targetFile.exists()) targetFile.delete()
             if (!tempFile.renameTo(targetFile)) {
-                throw IllegalStateException("Failed to finalize downloaded model file.")
+                throw IllegalStateException("Failed to finalize downloaded file in app storage.")
             }
 
             updateItem(modelId) {
@@ -177,13 +210,15 @@ class OfflineModelStoreManager(context: Context) {
                     installedBytes = targetFile.length(),
                     isDownloading = false,
                     progressPercent = 100,
+                    downloadedBytes = targetFile.length(),
+                    totalBytes = targetFile.length(),
                     error = null
                 )
             }
         } catch (ce: CancellationException) {
             tempFile.delete()
             updateItem(modelId) {
-                it.copy(isDownloading = false, progressPercent = 0, error = "Download cancelled")
+                it.copy(isDownloading = false, progressPercent = 0, error = "Download cancelled.")
             }
             throw ce
         } catch (e: Exception) {
@@ -192,11 +227,26 @@ class OfflineModelStoreManager(context: Context) {
                 it.copy(
                     isDownloading = false,
                     progressPercent = 0,
-                    error = e.message ?: "Download failed"
+                    error = e.message ?: "Download connection error"
                 )
             }
         } finally {
             activeJobs.remove(modelId)
+        }
+    }
+
+    fun importLocalModelFile(sourceUri: Uri, fileName: String): Boolean {
+        return try {
+            val targetFile = File(modelsDir, fileName)
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                FileOutputStream(targetFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            _modelsState.value = buildSnapshot()
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -211,8 +261,8 @@ class OfflineModelStoreManager(context: Context) {
 
     fun deleteModel(modelId: String): Boolean {
         cancelDownload(modelId)
-        val spec = catalog.find { it.id == modelId } ?: return false
-        val target = File(modelsDir, spec.fileName)
+        val spec = catalog.find { it.id == modelId }
+        val target = File(modelsDir, spec?.fileName ?: modelId)
         val deleted = !target.exists() || target.delete()
         _modelsState.value = buildSnapshot()
         return deleted

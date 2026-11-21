@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -70,6 +71,17 @@ fun ZeeNativeApp(
     val dao = remember { database.dao() }
     val geminiClient = remember { GeminiNativeClient() }
     val phoneCommander = remember { NativePhoneCommander(context) }
+
+    var modelImportNote by remember { mutableStateOf("") }
+    val modelFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val fileName = uri.lastPathSegment?.substringAfterLast("/") ?: "custom_model.bin"
+            val ok = modelStore.importLocalModelFile(uri, fileName)
+            modelImportNote = if (ok) "Successfully imported $fileName" else "Failed to import model file."
+        }
+    }
 
     var activeTab by remember { mutableStateOf("companion") } // companion | memory | models | settings
     var activeCharId by remember { mutableStateOf("zee") }    // zee | zhee
@@ -684,7 +696,10 @@ fun ZeeNativeApp(
                     }
 
                     "models" -> {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        val hfToken = keyVault.getKey("hf_token")
+
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            // Phone Control Status
                             item {
                                 Row(
                                     modifier = Modifier
@@ -694,10 +709,10 @@ fun ZeeNativeApp(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column {
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text("Phone Control (Accessibility)", color = Color.White, fontWeight = FontWeight.SemiBold)
                                         Text(
-                                            if (ZeeAccessibilityService.isConnected()) "Active" else "Not Enabled",
+                                            if (ZeeAccessibilityService.isConnected()) "Active • Ready for system gestures" else "Not Enabled",
                                             color = if (ZeeAccessibilityService.isConnected()) Color(0xFF34D399) else Color(0xFFFBBF24),
                                             fontSize = 12.sp
                                         )
@@ -707,32 +722,136 @@ fun ZeeNativeApp(
                                             Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                         )
-                                    }) { Text("Enable") }
+                                    }) { Text(if (ZeeAccessibilityService.isConnected()) "Settings" else "Enable") }
                                 }
                             }
+
+                            // Storage Info & Import Card
+                            item {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(CardSurface, RoundedCornerShape(14.dp))
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    val usedMb = modelStore.getTotalStorageUsedBytes() / (1024 * 1024)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Offline Models Storage", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                        Text("${usedMb} MB Used", color = ElectricBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    Text(
+                                        "Download verified models below or import any downloaded .bin / .task / .gguf model directly from phone storage.",
+                                        color = Silver,
+                                        fontSize = 11.sp
+                                    )
+
+                                    Button(
+                                        onClick = { modelFilePicker.launch("*/*") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("📁 Import Model from Phone Downloads")
+                                    }
+
+                                    if (modelImportNote.isNotBlank()) {
+                                        Text(modelImportNote, color = Color(0xFF34D399), fontSize = 12.sp)
+                                    }
+                                }
+                            }
+
+                            // Catalog Models
                             items(models, key = { it.spec.id }) { item ->
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .background(CardSurface, RoundedCornerShape(14.dp))
                                         .padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text(item.spec.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                    Text("${item.spec.type} • ~${item.spec.approxSizeMb} MB • ${item.spec.language}", color = Silver, fontSize = 11.sp)
-                                    if (item.isDownloading) {
-                                        LinearProgressIndicator(progress = { item.progressPercent / 100f }, modifier = Modifier.fillMaxWidth())
-                                    }
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(item.spec.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                         if (item.installed) {
-                                            OutlinedButton(onClick = { modelStore.deleteModel(item.spec.id) }) {
-                                                Text("Delete", color = Color(0xFFF87171))
+                                            Text(
+                                                "✓ Installed",
+                                                color = Color(0xFF34D399),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        "${item.spec.type} • ~${item.spec.approxSizeMb} MB • ${item.spec.language} • RAM: ${item.spec.minRamGb}GB+",
+                                        color = Silver,
+                                        fontSize = 11.sp
+                                    )
+
+                                    if (item.isDownloading) {
+                                        LinearProgressIndicator(
+                                            progress = { item.progressPercent / 100f },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = ElectricBlue
+                                        )
+                                        val downloadedMb = item.downloadedBytes / (1024 * 1024)
+                                        val totalMb = if (item.totalBytes > 0L) item.totalBytes / (1024 * 1024) else item.spec.approxSizeMb.toLong()
+                                        Text(
+                                            "Downloading: ${item.progressPercent}% (${downloadedMb} MB / ${totalMb} MB)",
+                                            color = ElectricBlue,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+
+                                    if (item.error != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(Color(0xFF7F1D1D), RoundedCornerShape(6.dp))
+                                                .padding(8.dp)
+                                        ) {
+                                            Text(
+                                                "Download Error: ${item.error}",
+                                                color = Color(0xFFFCA5A5),
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        if (item.installed) {
+                                            OutlinedButton(
+                                                onClick = { modelStore.deleteModel(item.spec.id) },
+                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171))
+                                            ) {
+                                                Text("Delete Model")
+                                            }
+                                        } else if (item.isDownloading) {
+                                            OutlinedButton(
+                                                onClick = { modelStore.cancelDownload(item.spec.id) },
+                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFBBF24))
+                                            ) {
+                                                Text("Cancel")
                                             }
                                         } else {
                                             Button(onClick = {
-                                                val job = scope.launch { modelStore.downloadModel(item.spec.id) }
+                                                val job = scope.launch {
+                                                    modelStore.downloadModel(item.spec.id, hfToken = hfToken)
+                                                }
                                                 modelStore.registerJob(item.spec.id, job)
-                                            }) { Text(if (item.isDownloading) "${item.progressPercent}%" else "Download") }
+                                            }) {
+                                                Text(if (item.error != null) "Retry Download" else "Download (~${item.spec.approxSizeMb} MB)")
+                                            }
                                         }
                                     }
                                 }
@@ -937,6 +1056,25 @@ fun ZeeNativeApp(
                                     }
                                 }
                             }
+
+                            HorizontalDivider(color = Color(0xFF1E293B))
+
+                            Text("Hugging Face Access Token (Optional)", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                            Text("Only needed if you want to download gated Google Gemma models directly from Hugging Face.", color = Silver, fontSize = 11.sp)
+
+                            var hfTokenInput by remember { mutableStateOf(keyVault.getKey("hf_token")) }
+                            OutlinedTextField(
+                                value = hfTokenInput,
+                                onValueChange = {
+                                    hfTokenInput = it
+                                    keyVault.saveKey("hf_token", it.trim())
+                                },
+                                visualTransformation = PasswordVisualTransformation(),
+                                placeholder = { Text("hf_...") },
+                                label = { Text("Hugging Face User Token") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
 
                             HorizontalDivider(color = Color(0xFF1E293B))
                             Text("Hardware Keystore Security", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
