@@ -23,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import com.zeeai.companion.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -324,19 +326,41 @@ fun ZeeNativeApp(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            "ZEE AI ECOSYSTEM",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                        Text(
-                            "100% Pure Native Android • Active: ${activeCharId.uppercase()}",
-                            color = Silver.copy(alpha = 0.7f),
-                            fontSize = 11.sp
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .background(Color(0xFF070D1D), CircleShape)
+                                    .border(1.2.dp, Color(0xFF00F0FF).copy(alpha = 0.6f), CircleShape)
+                                    .padding(4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                                    contentDescription = "ZEE AI Logo",
+                                    tint = Color.Unspecified,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                            Column {
+                                Text(
+                                    "ZEE AI ECOSYSTEM",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                                Text(
+                                    "100% Pure Native • ${activeCharId.uppercase()}",
+                                    color = Silver.copy(alpha = 0.7f),
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(8.dp))
 
                         listOf(
@@ -425,12 +449,27 @@ fun ZeeNativeApp(
                             ) {
                                 Text("Menu", fontSize = 11.sp)
                             }
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(Color(0xFF070D1D), CircleShape)
+                                    .border(1.dp, Color(0xFF00F0FF).copy(alpha = 0.5f), CircleShape)
+                                    .padding(3.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                                    contentDescription = "ZEE AI Emblem",
+                                    tint = Color.Unspecified,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
                             Column {
-                                Text("ZEE AI NATIVE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("ZEE AI", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text(
-                                    if (isNetworkAvailable()) "Online • Gemini Ready" else "Offline • Local Android Mode",
+                                    if (isNetworkAvailable()) "Online • Gemini Ready" else "Offline • Local Mode",
                                     color = if (isNetworkAvailable()) Color(0xFF34D399) else Color(0xFFFBBF24),
-                                    fontSize = 11.sp
+                                    fontSize = 10.sp
                                 )
                             }
                         }

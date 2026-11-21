@@ -1,14 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Stylized ZEE Obsidian & Electric Blue Z Emblem -->
+
+    <!-- Subtle Hairline Inner Cinema Aperture Ring (Safe Zone 24..84) -->
     <path
-        android:fillColor="#2F80FF"
-        android:pathData="M34,36 L74,36 L44,72 L74,72 L74,76 L34,76 L64,40 L34,40 Z" />
-    <!-- Glowing AI Core Indicator -->
+        android:pathData="M54,24 A30,30 0 1,1 53.99,24 Z"
+        android:strokeWidth="0.7"
+        android:strokeColor="#2EC8D1E0" />
+
+    <!-- Top & Bottom Luminous Aperture Arcs -->
     <path
-        android:fillColor="#00E5FF"
-        android:pathData="M54,54m-4,0a4,4 0 1,1 8,0a4,4 0 1,1 -8,0" />
+        android:pathData="M32.8,32.8 A30,30 0 0,1 75.2,32.8"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="32.8"
+                android:startY="24"
+                android:endX="75.2"
+                android:endY="24">
+                <item android:offset="0.0" android:color="#002F80FF" />
+                <item android:offset="0.5" android:color="#CC38BDF8" />
+                <item android:offset="1.0" android:color="#002F80FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path
+        android:pathData="M75.2,75.2 A30,30 0 0,1 32.8,75.2"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="75.2"
+                android:startY="84"
+                android:endX="32.8"
+                android:endY="84">
+                <item android:offset="0.0" android:color="#002F80FF" />
+                <item android:offset="0.5" android:color="#CC2F80FF" />
+                <item android:offset="1.0" android:color="#002F80FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Soft Under-Glow Behind Diagonal Beam -->
+    <path
+        android:pathData="M66,36 L74,36 L42,72 L34,72 Z"
+        android:strokeWidth="4.2"
+        android:strokeLineJoin="round"
+        android:strokeColor="#332F80FF" />
+
+    <!-- Top Metallic Titanium-Silver Blade (180° Precision Cut) -->
+    <path android:pathData="M34,36 L63,36 L55.7,44 L34,44 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="34"
+                android:startY="36"
+                android:endX="63"
+                android:endY="44">
+                <item android:offset="0.0" android:color="#FFFFFF" />
+                <item android:offset="0.55" android:color="#CBD5E1" />
+                <item android:offset="1.0" android:color="#7B8BA3" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Bottom Metallic Titanium-Silver Blade (180° Symmetric) -->
+    <path android:pathData="M52.3,64 L74,64 L74,72 L45,72 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="45"
+                android:startY="64"
+                android:endX="74"
+                android:endY="72">
+                <item android:offset="0.0" android:color="#7B8BA3" />
+                <item android:offset="0.45" android:color="#CBD5E1" />
+                <item android:offset="1.0" android:color="#FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Center Electric Cobalt-Cyan Energy Diagonal Slash -->
+    <path android:pathData="M66,36 L74,36 L42,72 L34,72 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="74"
+                android:startY="36"
+                android:endX="34"
+                android:endY="72">
+                <item android:offset="0.0" android:color="#00F0FF" />
+                <item android:offset="0.48" android:color="#2F80FF" />
+                <item android:offset="1.0" android:color="#1D4ED8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Razor-Sharp Highlight Spine on Diagonal Slash -->
+    <path
+        android:pathData="M69.2,37 L38.8,71"
+        android:strokeWidth="1.0"
+        android:strokeLineCap="round"
+        android:strokeColor="#AAFFFFFF" />
+
+    <!-- Cinematic Anamorphic Horizontal Lens Flare -->
+    <path android:pathData="M24,53.3 L84,53.3 L84,54.7 L24,54.7 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="24"
+                android:startY="54"
+                android:endX="84"
+                android:endY="54">
+                <item android:offset="0.0" android:color="#0000F0FF" />
+                <item android:offset="0.38" android:color="#5538BDF8" />
+                <item android:offset="0.5" android:color="#EEFFFFFF" />
+                <item android:offset="0.62" android:color="#5538BDF8" />
+                <item android:offset="1.0" android:color="#0000F0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Precision AI Core Pulse Dot -->
+    <path
+        android:pathData="M54,51.8 A2.2,2.2 0 1,1 53.99,51.8 Z"
+        android:fillColor="#FFFFFFFF" />
 </vector>
