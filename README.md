@@ -29,25 +29,6 @@
   <img src="https://img.shields.io/badge/Security-AES--256--GCM_Keystore-F59E0B?style=for-the-badge&logo=securityscorecard&logoColor=white&labelColor=060913" alt="Security" />
 </p>
 
----
-
-### 📲 Instant Direct Phone Download Hub
-
-<p align="center">
-  <a href="https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk">
-    <img src="https://img.shields.io/badge/%E2%96%B6_DIRECT_DOWNLOAD-zee--ai.apk_(29.6_MB)-2F80FF?style=for-the-badge&logo=android&logoColor=white&labelColor=060913" alt="Download zee-ai.apk" height="48" />
-  </a>
-</p>
-
-| Metric / Attribute | Specification |
-| :--- | :--- |
-| **Official Binary** | [`zee-ai.apk`](https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk) |
-| **Direct Download URL** | `https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk` |
-| **Package Size** | `29,678,892 bytes` (~`29.6 MB`) |
-| **SHA-256 Checksum** | `1aeb314d334fb9d94919b185c093941d20be00aecd205d82674a9489c762f7c2` |
-| **Installation Mode** | Auto-signed debug package; installs directly on any Android device without adb or root. |
-| **Target Runtimes** | Android 8.0 Oreo through Android 15 Vanilla Ice Cream (APIs 26 through 35) |
-
 </div>
 
 ---
