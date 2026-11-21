@@ -48,16 +48,20 @@ Most modern "AI mobile apps" are thin web wrappers: React Native bundles, Electr
 
 ## Core Feature Matrix & Native Architecture
 
+<p align="center">
+  <img src="assets/feature-matrix.svg" alt="ZEE AI Feature Matrix" width="100%" />
+</p>
+
 | Module / System | Native Android API & Engine | Operational Capability | Redundancy & Security Boundary |
 | :--- | :--- | :--- | :--- |
-| **Voice & Wake Word** | `AudioRecord` • Low-Latency ASR • `android.speech.tts.TextToSpeech` | Real-time wake detection, streaming speech recognition, and instant persona-conditioned vocal responses. | Runs entirely within foreground service; zero audio egress unless conversational query is dispatched. |
-| **Autonomous Phone Control** | `AccessibilityService` • `GestureDescription` • Node Tree Inspection | Inspects live AOSP UI hierarchies, executes programmatic taps, scrolls, text insertion, app launching, and automated workflows. | Destructive actions require explicit on-screen visual confirmation or biometric authentication (`BiometricPrompt`). |
-| **Online Intelligence** | Official Google GenAI SDK (Gemini 1.5 Pro / Flash) | Streaming tokens, multimodality, dynamic context caching, and real-time Google Search Grounding for verified factual synthesis. | Enforces strict payload sanitization; API keys isolated in encrypted Keystore-backed `EncryptedSharedPreferences`. |
-| **On-Device Offline Brain** | Google MediaPipe LLM Inference Engine (`Gemma-2B` / `Phi-2` .bin) | Zero-network fallback. Instant local creative drafts, shell commands, device diagnostics, and emergency voice responses. | 100% air-gapped on-device compute. Zero telemetry or external network calls made while operating in offline mode. |
-| **Filmmaker Studio** | Native Canvas • MediaPipe Image Embedder • Room DB | Cinematographic storyboard drafting, scene-by-scene script breakdown, shot deck lighting presets, and camera angle directors. | Local SQLite database persistence via Room; cached assets saved to app-scoped isolated media sandboxes. |
-| **YouTube Studio Engine** | Direct Google OAuth 2.0 PKCE • YouTube Data API v3 | Upload queue management, automated title/tag/description drafting, engagement analytics digestion, and thumbnail verification. | Scoped OAuth permissions; refresh tokens held exclusively inside hardware-backed Android Keystore. |
-| **Universal SAF Reader** | Storage Access Framework (`Intent.ACTION_OPEN_DOCUMENT_TREE`) | Scoped read access to device logs, scripts, text corpora, raw PDFs, and project directories without legacy file permission hazards. | Operates under strict Android 14+ Scoped Storage guidelines; never requests legacy `MANAGE_EXTERNAL_STORAGE`. |
-| **The AI Council** | Multi-Agent Synthetic Deliberation Matrix | ZEE and ZHEE cross-examine arguments, debate engineering or artistic trade-offs, and generate arbitrated decisions. | Synthesized in local memory queues; verdicts logged to persistent Room DB tables with full rationale history. |
+| **🎙️ Voice & Wake Word** | `AudioRecord` • Low-Latency ASR • `android.speech.tts.TextToSpeech` | Real-time wake detection, streaming speech recognition, and instant persona-conditioned vocal responses. | Runs entirely within foreground service; zero audio egress unless conversational query is dispatched. |
+| **📱 Autonomous Phone Control** | `AccessibilityService` • `GestureDescription` • Node Tree Inspection | Inspects live AOSP UI hierarchies, executes programmatic taps, scrolls, text insertion, app launching, and automated workflows. | Destructive actions require explicit on-screen visual confirmation or biometric authentication (`BiometricPrompt`). |
+| **⚡ Online Intelligence** | Official Google GenAI SDK (Gemini 1.5 Pro / Flash) | Streaming tokens, multimodality, dynamic context caching, and real-time Google Search Grounding for verified factual synthesis. | Enforces strict payload sanitization; API keys isolated in encrypted Keystore-backed `EncryptedSharedPreferences`. |
+| **🛡️ On-Device Offline Brain** | Google MediaPipe LLM Inference Engine (`Gemma-2B` / `Phi-2` .bin) | Zero-network fallback. Instant local creative drafts, shell commands, device diagnostics, and emergency voice responses. | 100% air-gapped on-device compute. Zero telemetry or external network calls made while operating in offline mode. |
+| **🎬 Filmmaker Studio** | Native Canvas • MediaPipe Image Embedder • Room DB | Cinematographic storyboard drafting, scene-by-scene script breakdown, shot deck lighting presets, and camera angle directors. | Local SQLite database persistence via Room; cached assets saved to app-scoped isolated media sandboxes. |
+| **📺 YouTube Studio Engine** | Direct Google OAuth 2.0 PKCE • YouTube Data API v3 | Upload queue management, automated title/tag/description drafting, engagement analytics digestion, and thumbnail verification. | Scoped OAuth permissions; refresh tokens held exclusively inside hardware-backed Android Keystore. |
+| **📂 Universal SAF Reader** | Storage Access Framework (`Intent.ACTION_OPEN_DOCUMENT_TREE`) | Scoped read access to device logs, scripts, text corpora, raw PDFs, and project directories without legacy file permission hazards. | Operates under strict Android 14+ Scoped Storage guidelines; never requests legacy `MANAGE_EXTERNAL_STORAGE`. |
+| **⚖️ The AI Council** | Multi-Agent Synthetic Deliberation Matrix | ZEE and ZHEE cross-examine arguments, debate engineering or artistic trade-offs, and generate arbitrated decisions. | Synthesized in local memory queues; verdicts logged to persistent Room DB tables with full rationale history. |
 
 ---
 
@@ -114,7 +118,9 @@ zee-ai/
 │       └── build-apk.yml                        # Cloud automated APK build pipeline
 ├── assets/
 │   ├── hero-banner.svg                          # Keyframe animated Obsidian Noir SVG banner
-│   └── persona-status.svg                       # Live dual-persona state indicator
+│   ├── persona-status.svg                       # Live dual-persona state indicator
+│   ├── feature-matrix.svg                       # Visual capabilities matrix with vector cards
+│   └── pipeline.svg                             # Animated cloud APK build & CI/CD pipeline
 ├── build.gradle.kts                             # Top-level Gradle script
 └── settings.gradle.kts
 ```
@@ -125,36 +131,9 @@ zee-ai/
 
 No Android Studio or local toolchain required to compile release builds. The repository includes a GitHub Actions continuous integration pipeline that compiles, signs, and packages release APKs directly in the cloud.
 
-```text
-                  ┌────────────────────────────────────────┐
-                  │ Push tag / Trigger 'build-apk.yml'     │
-                  └──────────────────┬─────────────────────┘
-                                     │
-                                     ▼
-                  ┌────────────────────────────────────────┐
-                  │ Ubuntu VM: JDK 17 + Android SDK Setup  │
-                  └──────────────────┬─────────────────────┘
-                                     │
-                                     ▼
-                  ┌────────────────────────────────────────┐
-                  │ ./gradlew assembleRelease              │
-                  └──────────────────┬─────────────────────┘
-                                     │
-                                     ▼
-                  ┌────────────────────────────────────────┐
-                  │ Decrypt Keystore & Sign Release APK    │
-                  └──────────────────┬─────────────────────┘
-                                     │
-                                     ▼
-                  ┌────────────────────────────────────────┐
-                  │ Upload to GitHub Artifacts / Releases  │
-                  └──────────────────┬─────────────────────┘
-                                     │
-                                     ▼
-                  ┌────────────────────────────────────────┐
-                  │ Direct Phone Download & Install        │
-                  └────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="assets/pipeline.svg" alt="Automated Cloud APK Build Pipeline" width="100%" />
+</p>
 
 ### GitHub Actions Workflow: `.github/workflows/build-apk.yml`
 

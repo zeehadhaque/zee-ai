@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 180" width="100%" height="auto">
+  <defs>
+    <linearGradient id="pipeBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#060913" />
+      <stop offset="50%" stop-color="#080E1C" />
+      <stop offset="100%" stop-color="#04060C" />
+    </linearGradient>
+
+    <linearGradient id="flowBeam" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2F80FF" />
+      <stop offset="50%" stop-color="#60A5FA" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+
+    <filter id="nodeGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <style>
+    .step-num { font-family: 'SF Mono', Consolas, monospace; font-size: 10px; font-weight: 800; fill: #60A5FA; letter-spacing: 1px; }
+    .node-title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11.5px; font-weight: 700; fill: #F8FAFC; }
+    .node-sub { font-family: 'SF Mono', Consolas, monospace; font-size: 9.5px; fill: #94A3B8; }
+    .header-tag { font-family: 'SF Mono', Consolas, monospace; font-size: 10.5px; font-weight: 700; fill: #2F80FF; letter-spacing: 2px; }
+  </style>
+
+  <!-- Frame Background -->
+  <rect width="920" height="180" rx="10" fill="url(#pipeBg)" stroke="#1E293B" stroke-width="1.2" />
+
+  <!-- Top Pipeline Status -->
+  <g transform="translate(25, 22)">
+    <circle cx="5" cy="5" r="3.5" fill="#34D399">
+      <animate attributeName="opacity" values="1;0.2;1" dur="2s" repeatCount="indefinite" />
+    </circle>
+    <text x="18" y="9" class="header-tag">CONTINUOUS INTEGRATION &amp; CLOUD PACKAGING PIPELINE</text>
+  </g>
+
+  <!-- CONNECTING ANIMATED FLOW TRACK -->
+  <g transform="translate(20, 95)">
+    <line x1="60" y1="0" x2="820" y2="0" stroke="#1E293B" stroke-width="2.5" />
+    <line x1="60" y1="0" x2="820" y2="0" stroke="url(#flowBeam)" stroke-width="2.5" stroke-dasharray="12 16">
+      <animate attributeName="stroke-dashoffset" from="56" to="0" dur="2.4s" repeatCount="indefinite" />
+    </line>
+  </g>
+
+  <!-- 6 PIPELINE NODES -->
+
+  <!-- NODE 1: Trigger -->
+  <g transform="translate(20, 45)">
+    <rect width="130" height="100" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" filter="url(#nodeGlow)" />
+    <rect x="10" y="10" width="30" height="16" rx="4" fill="#1E293B" />
+    <text x="18" y="22" class="step-num">01</text>
+    <!-- Tag Icon -->
+    <path d="M 105 15 L 115 15 L 120 20 L 112 28 L 105 21 Z" fill="none" stroke="#60A5FA" stroke-width="1.4" />
+    <text x="10" y="52" class="node-title">Push Trigger</text>
+    <text x="10" y="70" class="node-sub">Git Tag (v*)</text>
+    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">or Dispatch</text>
+  </g>
+
+  <!-- NODE 2: Cloud Host -->
+  <g transform="translate(168, 45)">
+    <rect width="130" height="100" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <rect x="10" y="10" width="30" height="16" rx="4" fill="#1E293B" />
+    <text x="18" y="22" class="step-num">02</text>
+    <!-- Server Icon -->
+    <rect x="102" y="14" width="18" height="12" rx="2" fill="none" stroke="#60A5FA" stroke-width="1.3" />
+    <line x1="105" y1="18" x2="108" y2="18" stroke="#34D399" stroke-width="1.5" />
+    <text x="10" y="52" class="node-title">Runner VM</text>
+    <text x="10" y="70" class="node-sub">Ubuntu Host</text>
+    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">JDK 17 + AOSP</text>
+  </g>
+
+  <!-- NODE 3: Gradle Build -->
+  <g transform="translate(316, 45)">
+    <rect width="130" height="100" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <rect x="10" y="10" width="30" height="16" rx="4" fill="#1E293B" />
+    <text x="18" y="22" class="step-num">03</text>
+    <!-- Gear Icon -->
+    <circle cx="111" cy="20" r="6" fill="none" stroke="#60A5FA" stroke-width="1.4" />
+    <text x="10" y="52" class="node-title">Gradle Engine</text>
+    <text x="10" y="70" class="node-sub">assembleRelease</text>
+    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">No-daemon</text>
+  </g>
+
+  <!-- NODE 4: Apksigner -->
+  <g transform="translate(464, 45)">
+    <rect width="130" height="100" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <rect x="10" y="10" width="30" height="16" rx="4" fill="#1E293B" />
+    <text x="18" y="22" class="step-num">04</text>
+    <!-- Key Lock Icon -->
+    <rect x="105" y="17" width="12" height="10" rx="2" fill="none" stroke="#FBBF24" stroke-width="1.3" />
+    <path d="M 108 17 L 108 13 A 3 3 0 0 1 114 13 L 114 17" fill="none" stroke="#FBBF24" stroke-width="1.3" />
+    <text x="10" y="52" class="node-title">Keystore Sign</text>
+    <text x="10" y="70" class="node-sub">apksigner JKS</text>
+    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">Base64 secrets</text>
+  </g>
+
+  <!-- NODE 5: Artifacts & Releases -->
+  <g transform="translate(612, 45)">
+    <rect width="130" height="100" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <rect x="10" y="10" width="30" height="16" rx="4" fill="#1E293B" />
+    <text x="18" y="22" class="step-num">05</text>
+    <!-- Package Box Icon -->
+    <polygon points="103,16 111,12 119,16 111,20" fill="none" stroke="#A78BFA" stroke-width="1.3" />
+    <polyline points="103,16 103,24 111,28 119,24 119,16" fill="none" stroke="#A78BFA" stroke-width="1.3" />
+    <line x1="111" y1="20" x2="111" y2="28" stroke="#A78BFA" stroke-width="1.3" />
+    <text x="10" y="52" class="node-title">Artifact Output</text>
+    <text x="10" y="70" class="node-sub">GitHub Actions</text>
+    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">Release Tag</text>
+  </g>
+
+  <!-- NODE 6: Phone Sideload -->
+  <g transform="translate(760, 45)">
+    <rect width="130" height="100" rx="8" fill="#0B1120" stroke="#34D399" stroke-width="1.4" filter="url(#nodeGlow)" />
+    <rect x="10" y="10" width="30" height="16" rx="4" fill="#064E3B" />
+    <text x="18" y="22" fill="#34D399" class="step-num">06</text>
+    <!-- Mobile Phone Icon -->
+    <rect x="106" y="13" width="12" height="18" rx="2" fill="none" stroke="#34D399" stroke-width="1.4" />
+    <circle cx="112" cy="27" r="1" fill="#34D399" />
+    <text x="10" y="52" class="node-title">Device Install</text>
+    <text x="10" y="70" fill="#34D399" class="node-sub">Direct APK</text>
+    <text x="10" y="85" fill="#64748B" font-family="monospace" font-size="8.5">Scan &amp; Launch</text>
+  </g>
+</svg>

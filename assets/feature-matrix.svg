@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 440" width="100%" height="auto">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="matrixBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#060913" />
+      <stop offset="50%" stop-color="#080E1C" />
+      <stop offset="100%" stop-color="#04060C" />
+    </linearGradient>
+
+    <!-- Glowing Accents -->
+    <linearGradient id="blueGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1D4ED8" />
+      <stop offset="100%" stop-color="#2F80FF" />
+    </linearGradient>
+    <linearGradient id="purpleGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6D28D9" />
+      <stop offset="100%" stop-color="#A855F7" />
+    </linearGradient>
+    <linearGradient id="cyanGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0D9488" />
+      <stop offset="100%" stop-color="#14B8A6" />
+    </linearGradient>
+    <linearGradient id="amberGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#D97706" />
+      <stop offset="100%" stop-color="#F59E0B" />
+    </linearGradient>
+
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <style>
+    .card-title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13.5px; font-weight: 700; fill: #F8FAFC; }
+    .card-badge { font-family: 'SF Mono', Consolas, monospace; font-size: 9.5px; font-weight: 600; }
+    .card-desc { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; fill: #94A3B8; }
+    .header-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; font-weight: 700; fill: #60A5FA; letter-spacing: 2.5px; }
+  </style>
+
+  <!-- Container Box -->
+  <rect width="920" height="440" rx="12" fill="url(#matrixBg)" stroke="#1E293B" stroke-width="1.5" />
+
+  <!-- Top Title Strip -->
+  <g transform="translate(30, 26)">
+    <circle cx="6" cy="6" r="4" fill="#2F80FF">
+      <animate attributeName="opacity" values="1;0.3;1" dur="2s" repeatCount="indefinite" />
+    </circle>
+    <text x="20" y="10" class="header-text">NATIVE CAPABILITIES MATRIX • 100% PURE AOSP</text>
+  </g>
+
+  <!-- 8 CARDS (2 COLUMNS x 4 ROWS) -->
+
+  <!-- ROW 1, COL 1: Voice & Wake Word -->
+  <g transform="translate(30, 52)">
+    <rect width="415" height="82" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <!-- Icon Circle -->
+    <circle cx="34" cy="41" r="20" fill="#0F172A" stroke="#2F80FF" stroke-width="1.5" filter="url(#softGlow)" />
+    <!-- Mic / Wave SVG Icon -->
+    <path d="M 34 29 L 34 45 M 29 36 L 29 38 M 39 36 L 39 38 M 25 37 A 9 9 0 0 0 43 37 M 34 45 L 34 51 M 30 51 L 38 51" 
+          fill="none" stroke="#60A5FA" stroke-width="1.8" stroke-linecap="round" />
+    <text x="68" y="30" class="card-title">Voice &amp; Wake Word Core</text>
+    <rect x="68" y="38" width="180" height="17" rx="3.5" fill="#1E293B" />
+    <text x="74" y="50" fill="#60A5FA" class="card-badge">AudioRecord • Low-Latency TTS</text>
+    <text x="68" y="70" class="card-desc">Real-time wake word detection and persona voice streams.</text>
+  </g>
+
+  <!-- ROW 1, COL 2: Autonomous Phone Control -->
+  <g transform="translate(475, 52)">
+    <rect width="415" height="82" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <!-- Icon Circle -->
+    <circle cx="34" cy="41" r="20" fill="#0F172A" stroke="#10B981" stroke-width="1.5" filter="url(#softGlow)" />
+    <!-- Phone / Pointer Icon -->
+    <rect x="27" y="27" width="14" height="26" rx="2" fill="none" stroke="#34D399" stroke-width="1.6" />
+    <circle cx="34" cy="48" r="1.2" fill="#34D399" />
+    <path d="M 38 34 L 46 42 M 42 42 L 46 42 L 46 38" fill="none" stroke="#34D399" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    <text x="68" y="30" class="card-title">Autonomous OS Navigation</text>
+    <rect x="68" y="38" width="180" height="17" rx="3.5" fill="#1E293B" />
+    <text x="74" y="50" fill="#34D399" class="card-badge">AccessibilityService • Gestures</text>
+    <text x="68" y="70" class="card-desc">Programmatic taps, scrolls, app automation &amp; screen reading.</text>
+  </g>
+
+  <!-- ROW 2, COL 1: Online Intelligence -->
+  <g transform="translate(30, 146)">
+    <rect width="415" height="82" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <circle cx="34" cy="41" r="20" fill="#0F172A" stroke="#2F80FF" stroke-width="1.5" filter="url(#softGlow)" />
+    <!-- Sparkle / Brain Icon -->
+    <path d="M 34 28 L 36 36 L 44 38 L 36 40 L 34 48 L 32 40 L 24 38 L 32 36 Z" fill="none" stroke="#60A5FA" stroke-width="1.8" />
+    <text x="68" y="30" class="card-title">Online Gemini Streaming</text>
+    <rect x="68" y="38" width="180" height="17" rx="3.5" fill="#1E293B" />
+    <text x="74" y="50" fill="#60A5FA" class="card-badge">Gemini 1.5 Pro • Search Grounding</text>
+    <text x="68" y="70" class="card-desc">Live token streaming with verified Google Search factuality.</text>
+  </g>
+
+  <!-- ROW 2, COL 2: On-Device Offline Brain -->
+  <g transform="translate(475, 146)">
+    <rect width="415" height="82" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <circle cx="34" cy="41" r="20" fill="#0F172A" stroke="#F59E0B" stroke-width="1.5" filter="url(#softGlow)" />
+    <!-- Chip / Shield Icon -->
+    <rect x="26" y="32" width="16" height="16" rx="2" fill="none" stroke="#FBBF24" stroke-width="1.6" />
+    <line x1="30" y1="28" x2="30" y2="32" stroke="#FBBF24" stroke-width="1.5" />
+    <line x1="38" y1="28" x2="38" y2="32" stroke="#FBBF24" stroke-width="1.5" />
+    <line x1="30" y1="48" x2="30" y2="52" stroke="#FBBF24" stroke-width="1.5" />
+    <line x1="38" y1="48" x2="38" y2="52" stroke="#FBBF24" stroke-width="1.5" />
+    <text x="68" y="30" class="card-title">Air-Gapped Offline LLM</text>
+    <rect x="68" y="38" width="180" height="17" rx="3.5" fill="#1E293B" />
+    <text x="74" y="50" fill="#FBBF24" class="card-badge">MediaPipe GenAI • Gemma/Phi</text>
+    <text x="68" y="70" class="card-desc">100% on-device local inference fallback without network.</text>
+  </g>
+
+  <!-- ROW 3, COL 1: Filmmaker Studio -->
+  <g transform="translate(30, 240)">
+    <rect width="415" height="82" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <circle cx="34" cy="41" r="20" fill="#0F172A" stroke="#8B5CF6" stroke-width="1.5" filter="url(#softGlow)" />
+    <!-- Clapperboard Icon -->
+    <path d="M 25 33 L 43 33 L 43 49 L 25 49 Z M 25 33 L 28 27 L 43 27 L 40 33 Z M 32 27 L 35 33 M 38 27 L 41 33" 
+          fill="none" stroke="#C084FC" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    <text x="68" y="30" class="card-title">Filmmaker &amp; Narrative Studio</text>
+    <rect x="68" y="38" width="180" height="17" rx="3.5" fill="#1E293B" />
+    <text x="74" y="50" fill="#C084FC" class="card-badge">Native Canvas • Storyboard Engine</text>
+    <text x="68" y="70" class="card-desc">Scene script breakdown, shot deck lighting and visual design.</text>
+  </g>
+
+  <!-- ROW 3, COL 2: YouTube Studio Engine -->
+  <g transform="translate(475, 240)">
+    <rect width="415" height="82" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <circle cx="34" cy="41" r="20" fill="#0F172A" stroke="#EF4444" stroke-width="1.5" filter="url(#softGlow)" />
+    <!-- Play Video Icon -->
+    <rect x="24" y="30" width="20" height="18" rx="4" fill="none" stroke="#F87171" stroke-width="1.6" />
+    <polygon points="32,35 39,39 32,43" fill="#F87171" />
+    <text x="68" y="30" class="card-title">YouTube Studio Engine</text>
+    <rect x="68" y="38" width="180" height="17" rx="3.5" fill="#1E293B" />
+    <text x="74" y="50" fill="#F87171" class="card-badge">OAuth 2.0 PKCE • Data API v3</text>
+    <text x="68" y="70" class="card-desc">Automated title/tag drafting, analytics digestion &amp; uploads.</text>
+  </g>
+
+  <!-- ROW 4, COL 1: Universal SAF Reader -->
+  <g transform="translate(30, 334)">
+    <rect width="415" height="82" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <circle cx="34" cy="41" r="20" fill="#0F172A" stroke="#06B6D4" stroke-width="1.5" filter="url(#softGlow)" />
+    <!-- Folder / Document Icon -->
+    <path d="M 25 32 L 31 32 L 34 35 L 43 35 L 43 49 L 25 49 Z" fill="none" stroke="#22D3EE" stroke-width="1.6" />
+    <line x1="29" y1="41" x2="39" y2="41" stroke="#22D3EE" stroke-width="1.4" />
+    <line x1="29" y1="45" x2="35" y2="45" stroke="#22D3EE" stroke-width="1.4" />
+    <text x="68" y="30" class="card-title">Universal SAF Document Reader</text>
+    <rect x="68" y="38" width="180" height="17" rx="3.5" fill="#1E293B" />
+    <text x="74" y="50" fill="#22D3EE" class="card-badge">Scoped Storage • ACTION_OPEN_TREE</text>
+    <text x="68" y="70" class="card-desc">Zero external cloud leak; scoped read access to phone files.</text>
+  </g>
+
+  <!-- ROW 4, COL 2: The AI Council -->
+  <g transform="translate(475, 334)">
+    <rect width="415" height="82" rx="8" fill="#0B1120" stroke="#1E293B" stroke-width="1.2" />
+    <circle cx="34" cy="41" r="20" fill="#0F172A" stroke="#8B5CF6" stroke-width="1.5" filter="url(#softGlow)" />
+    <!-- Balance / Council Icon -->
+    <path d="M 34 28 L 34 50 M 27 50 L 41 50 M 26 34 L 42 34 M 26 34 L 23 43 M 42 34 L 45 43" 
+          fill="none" stroke="#A78BFA" stroke-width="1.6" stroke-linecap="round" />
+    <text x="68" y="30" class="card-title">The AI Council (Synthesis)</text>
+    <rect x="68" y="38" width="180" height="17" rx="3.5" fill="#1E293B" />
+    <text x="74" y="50" fill="#A78BFA" class="card-badge">Multi-Agent Deliberation • Room DB</text>
+    <text x="68" y="70" class="card-desc">ZEE and ZHEE debate decisions with logged audit history.</text>
+  </g>
+</svg>
