@@ -4,288 +4,236 @@
   <img src="assets/hero-banner.svg" alt="ZEE AI Hero Banner" width="100%" />
 </p>
 
+# 🌌 ZEE AI • Pure Native Android Intelligence
+### *Auteur Cinema Video Generation • Dual-Persona Human Voice Core • Air-Gapped Offline Brain*
+
 <p align="center">
-  <a href="https://github.com/zeehadhaque/zee-ai">
-    <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=14&duration=2800&pause=1000&color=2F80FF&center=true&vCenter=true&width=740&lines=100%25+PURE+NATIVE+ANDROID+%E2%80%A2+KOTLIN+2.0+%E2%80%A2+ZERO+WEBVIEW;AOSP+ACCESSIBILITY+PHONE+CONTROL+%E2%80%A2+ROOM+DB+PERSISTENCE;DUAL-PERSONA+VOICE+CORE%3A+ZEE+(OPS)+%26+ZHEE+(CREATIVE);ONLINE+GEMINI+SEARCH+GROUNDING+%2B+OFFLINE+MEDIAPIPE" alt="Typing Banner" />
+  <a href="https://github.com/zeehadhaque/zee-ai/releases/latest">
+    <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=15&duration=2500&pause=1000&color=00F0FF&center=true&vCenter=true&width=860&lines=ZEE+AI+v1.0.0+%E2%80%A2+100%25+PURE+NATIVE+ANDROID+%E2%80%A2+ZERO+WEBVIEW;OBSIDIAN+NOIR+ADAPTIVE+ICON+%E2%80%A2+ANAMORPHIC+APERTURE+EMBLEM;CINEMA+STUDIO%3A+VEO+2+%2F+SORA+VIDEO+GEN+%2B+FACE+LOCK;DUAL+HUMAN+VOICE+CORE%3A+ZEE+(BARITONE)+%26+ZHEE+(SWEET);11+FREE+OFFLINE+MODELS%3A+GOOGLE+GEMMA+2B+%2B+QWEN+2.5;AOSP+ACCESSIBILITY+PHONE+CONTROL+%E2%80%A2+HARDWARE+KEYSTORE" alt="ZEE AI Animated Typist Banner" />
   </a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-Android_14%2B_(API_34)-060913?style=for-the-badge&logo=android&logoColor=3DDC84&labelColor=060913" alt="Platform" />
+  <a href="https://github.com/zeehadhaque/zee-ai/releases/latest">
+    <img src="https://img.shields.io/badge/Release-v1.0.0_Stable-2F80FF?style=for-the-badge&logo=github&logoColor=white&labelColor=060913" alt="Release" />
+  </a>
+  <a href="https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk">
+    <img src="https://img.shields.io/badge/Package-zee--ai.apk-00F0FF?style=for-the-badge&logo=android&logoColor=white&labelColor=060913" alt="Package" />
+  </a>
+  <a href="https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk">
+    <img src="https://img.shields.io/badge/Size-29.6_MB-10B981?style=for-the-badge&logo=googleplay&logoColor=white&labelColor=060913" alt="Size" />
+  </a>
+  <img src="https://img.shields.io/badge/Platform-Android_8.0_%E2%80%93_15%2B_(API_26--35)-060913?style=for-the-badge&logo=android&logoColor=3DDC84&labelColor=060913" alt="Platform" />
   <img src="https://img.shields.io/badge/Language-Kotlin_2.0-060913?style=for-the-badge&logo=kotlin&logoColor=7F52FF&labelColor=060913" alt="Kotlin" />
   <img src="https://img.shields.io/badge/UI-Jetpack_Compose_Material_3-060913?style=for-the-badge&logo=jetpackcompose&logoColor=4285F4&labelColor=060913" alt="Compose" />
-  <img src="https://img.shields.io/badge/Storage-Room_DB_v2.6-060913?style=for-the-badge&logo=sqlite&logoColor=003B57&labelColor=060913" alt="Room" />
-  <img src="https://img.shields.io/badge/On--Device-MediaPipe_LLM-060913?style=for-the-badge&logo=google&logoColor=FBBC05&labelColor=060913" alt="MediaPipe" />
-  <img src="https://img.shields.io/badge/Cloud_Engine-Gemini_Live_%2B_Search-060913?style=for-the-badge&logo=googlegemini&logoColor=2F80FF&labelColor=060913" alt="Gemini" />
-  <img src="https://img.shields.io/badge/CI%2FCD-GitHub_Actions_Cloud_APK-060913?style=for-the-badge&logo=githubactions&logoColor=2088FF&labelColor=060913" alt="Actions" />
+  <img src="https://img.shields.io/badge/Security-AES--256--GCM_Keystore-F59E0B?style=for-the-badge&logo=securityscorecard&logoColor=white&labelColor=060913" alt="Security" />
 </p>
+
+---
+
+### 📲 Instant Direct Phone Download Hub
+
+<p align="center">
+  <a href="https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk">
+    <img src="https://img.shields.io/badge/%E2%96%B6_DIRECT_DOWNLOAD-zee--ai.apk_(29.6_MB)-2F80FF?style=for-the-badge&logo=android&logoColor=white&labelColor=060913" alt="Download zee-ai.apk" height="48" />
+  </a>
+</p>
+
+| Metric / Attribute | Specification |
+| :--- | :--- |
+| **Official Binary** | [`zee-ai.apk`](https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk) |
+| **Direct Download URL** | `https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk` |
+| **Package Size** | `29,678,892 bytes` (~`29.6 MB`) |
+| **SHA-256 Checksum** | `1aeb314d334fb9d94919b185c093941d20be00aecd205d82674a9489c762f7c2` |
+| **Installation Mode** | Auto-signed debug package; installs directly on any Android device without adb or root. |
+| **Target Runtimes** | Android 8.0 Oreo through Android 15 Vanilla Ice Cream (APIs 26 through 35) |
 
 </div>
 
 ---
 
-### Dual Persona Switcher & Runtime State
+## ⚡ Dual-Persona Switcher & Runtime State
 
 <p align="center">
   <img src="assets/persona-status.svg" alt="ZEE AI Dual Persona State" width="100%" />
 </p>
 
+| Persona Core | Vocal Signature | Dynamic Persona Conditioning | Primary Domains |
+| :--- | :--- | :--- | :--- |
+| **⚔️ ZEE** | Deep Masculine Baritone Resonance (`Pitch: 0.85`, `Rate: 1.02`) | Razor-sharp logic, hard-hitting resilience motivation, tactical phone operations, direct code architecture. | Phone Control • Systems Architecture • Research Radar • AI Council Defense |
+| **🌸 ZHEE** | Sweet Melodic Feminine Warmth (`Pitch: 1.18`, `Rate: 0.96`) | Deep empathetic soothing, creative aesthetic direction, romantic Bengali poetry, mood swing de-escalation. | Filmmaker Cinema Studio • Creative Writing • Human Empathy • Emotional Healing |
+
 ---
 
-## Architectural Manifesto
+## 🏛️ Architectural Manifesto: 100% Pure Native Android
 
-Most modern "AI mobile apps" are thin web wrappers: React Native bundles, Electron ports, or localhost Node/Python servers silently draining battery in the background while routing sandboxed DOM clicks.
+Most modern "AI mobile apps" are glorified web wrappers: bloated React Native bundles, Electron ports, or localhost Node/Python servers silently draining battery in the background while routing sandboxed DOM clicks.
 
-**ZEE AI is engineered on the opposite philosophy: 100% pure native Android.**
+**ZEE AI is engineered on the opposite philosophy: uncompromising, hardware-accelerated pure native Android.**
 
 > [!NOTE]
-> - **Zero WebViews:** Every pixel is rendered by Jetpack Compose into hardware-accelerated Skia surfaces.
-> - **Zero Localhost Runtimes:** No internal HTTP servers running on `127.0.0.1`. Inter-component messaging uses standard Android IPC, Kotlin Coroutines `Flow`, and Jetpack Architecture primitives.
-> - **Deep Android Integration:** Operates directly inside the operating system via a custom `AccessibilityService` engine, interacting with apps, notifications, and settings natively.
-> - **Dual-Brain Hybrid Engine:** Streams high-tier Gemini intelligence with real-time Google Search Grounding when connected; seamlessly switches down to on-device MediaPipe LLM inference when offline.
+> - **Zero WebViews:** Every pixel is rendered natively by Jetpack Compose into hardware-accelerated Skia surfaces.
+> - **Zero Localhost Runtimes:** No internal HTTP servers on `127.0.0.1`. Inter-component messaging uses standard Android IPC, Kotlin Coroutines `Flow`, and Jetpack Architecture primitives.
+> - **Deep AOSP Integration:** Operates directly inside the operating system via a custom `AccessibilityService` engine, interacting with apps, notifications, and settings with sub-10ms latency.
+> - **Dual-Brain Hybrid Engine:** Streams high-tier Gemini intelligence with real-time Google Search Grounding when connected; seamlessly switches down to on-device MediaPipe / GGUF LLM inference when offline.
 
 ---
 
-## Core Feature Matrix & Native Architecture
+## 🚀 Breakthrough Capabilities in v1.0.0
 
 <p align="center">
   <img src="assets/feature-matrix.svg" alt="ZEE AI Feature Matrix" width="100%" />
 </p>
 
-| Module / System | Native Android API & Engine | Operational Capability | Redundancy & Security Boundary |
-| :--- | :--- | :--- | :--- |
-| **🎙️ Voice & Wake Word** | `AudioRecord` • Low-Latency ASR • `android.speech.tts.TextToSpeech` | Real-time wake detection, streaming speech recognition, and instant persona-conditioned vocal responses. | Runs entirely within foreground service; zero audio egress unless conversational query is dispatched. |
-| **📱 Autonomous Phone Control** | `AccessibilityService` • `GestureDescription` • Node Tree Inspection | Inspects live AOSP UI hierarchies, executes programmatic taps, scrolls, text insertion, app launching, and automated workflows. | Destructive actions require explicit on-screen visual confirmation or biometric authentication (`BiometricPrompt`). |
-| **⚡ Online Intelligence** | Official Google GenAI SDK (Gemini 1.5 Pro / Flash) | Streaming tokens, multimodality, dynamic context caching, and real-time Google Search Grounding for verified factual synthesis. | Enforces strict payload sanitization; API keys isolated in encrypted Keystore-backed `EncryptedSharedPreferences`. |
-| **🛡️ On-Device Offline Brain** | Google MediaPipe LLM Inference Engine (`Gemma-2B` / `Phi-2` .bin) | Zero-network fallback. Instant local creative drafts, shell commands, device diagnostics, and emergency voice responses. | 100% air-gapped on-device compute. Zero telemetry or external network calls made while operating in offline mode. |
-| **🎬 Filmmaker Studio** | Native Canvas • MediaPipe Image Embedder • Room DB | Cinematographic storyboard drafting, scene-by-scene script breakdown, shot deck lighting presets, and camera angle directors. | Local SQLite database persistence via Room; cached assets saved to app-scoped isolated media sandboxes. |
-| **📺 YouTube Studio Engine** | Direct Google OAuth 2.0 PKCE • YouTube Data API v3 | Upload queue management, automated title/tag/description drafting, engagement analytics digestion, and thumbnail verification. | Scoped OAuth permissions; refresh tokens held exclusively inside hardware-backed Android Keystore. |
-| **📂 Universal SAF Reader** | Storage Access Framework (`Intent.ACTION_OPEN_DOCUMENT_TREE`) | Scoped read access to device logs, scripts, text corpora, raw PDFs, and project directories without legacy file permission hazards. | Operates under strict Android 14+ Scoped Storage guidelines; never requests legacy `MANAGE_EXTERNAL_STORAGE`. |
-| **⚖️ The AI Council** | Multi-Agent Synthetic Deliberation Matrix | ZEE and ZHEE cross-examine arguments, debate engineering or artistic trade-offs, and generate arbitrated decisions. | Synthesized in local memory queues; verdicts logged to persistent Room DB tables with full rationale history. |
+### 🎬 1. ZEE Cinema Studio (Scene-by-Scene Video Gen & Face Reference Lock)
+A specialized, auteur-grade generative cinema suite built directly into your pocket:
+- **🎥 Realistic Video Gen (Long-Form):** Generates scene-by-scene prompt engineering formatted for **Google Veo 2, OpenAI Sora, Runway Gen-3 Alpha, Kling 1.5 HD, and Wan 2.1**.
+  - Supports *1 Shot Teaser*, *3 Scenes Story Arc*, *5 Scenes Long Sequence*, and *Full 2-3 min Film Sequence*.
+  - Aspect Ratio selection: *2.39:1 Anamorphic Cinema Widescreen (Arri Alexa 65)*, *16:9 4K UHD*, *9:16 Vertical Cinema*, *4:3 Academy Golden Ratio*.
+  - Visual aesthetic choices: *Photorealistic Live-Action*, *Dark Gritty Cinema Verite*, *High-Fashion Anamorphic Flares*, *Steadicam Golden Hour*.
+- **👤 Face Reference & Zero-Shape-Change Lock:**
+  - Attach any portrait photo via Android Storage Access Framework (`image/*`).
+  - Strict Identity Matrix locks 100% of facial bone structure, eye distance, nose bridge, jawline contour, and skin complexion across all cuts, angles, and lighting transitions with **zero facial morphing**.
+  - Online, Gemini Vision reads the attached image directly via Multimodal streaming!
+- **📸 Master Shot List & 3-Point Lighting Studio:**
+  - Shot-by-shot Director's Sheet (Shot #, Framing: ECU/CU/MCU/MS/WS, Lens Focal Length: 18mm–85mm, Camera Movement: Steadicam, Dolly In, Handheld).
+  - Master 3-point lighting design (Key light, Fill ratios, Rim/Kicker, Practicals, Kelvin color temps, volumetric atmospheric haze).
+- **👁️ ZEE Cinema Analysis:** Auteur-grade visual analysis of mise-en-scène, color theory, blocking, semiotics, pacing, and directing takeaways.
+- **⚡ 1-Tap Copy Action:** Instant clipboard copy button to paste generated prompts directly into Veo / Sora / Kling / Midjourney!
 
 ---
 
-## Modular Architecture & Package Structure (`com.zeeai.companion`)
+### 🧠 2. Offline Model Store (11 Free Local AI Models)
+Equipped with verified, direct, public Hugging Face endpoints with live download progress (`%`, `MB downloaded / MB total`), retry logic, cancellation, and **local file import** (`.bin`, `.gguf`, `.task`):
+
+| Model Spec | Type | Parameters & Format | Approx Size | Min RAM | Key Specialization |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Google Gemma 2 2B Instruct** | LLM | Q4_K_M GGUF | `1,630 MB` | 4 GB | Multilingual Flagship (EN / BN / HI / UR) |
+| **Google Gemma 2 2B Mobile Fast** | LLM | IQ3_M GGUF | `1,250 MB` | 3 GB | Ultra-Fast Mobile Execution |
+| **Google Gemma 2B Hardware INT4** | LLM | MediaPipe GPU .bin | `1,350 MB` | 6 GB | Native MediaPipe OpenCL Hardware Acceleration |
+| **Qwen 2.5 0.5B Instruct** | LLM | Q4_K_M GGUF | `398 MB` | 2 GB | Ultra-Fast Bengali, English, Hindi & Urdu |
+| **Qwen 2.5 1.5B Instruct** | LLM | Q4_K_M GGUF | `980 MB` | 4 GB | High-IQ Creative Writing, Kobita & Shayeri |
+| **Qwen 2.5 Coder 1.5B** | LLM | Q4_K_M GGUF | `980 MB` | 4 GB | Offline Kotlin, Python & Web Code Specialist |
+| **Meta Llama 3.2 1B Instruct** | LLM | Q4_K_M GGUF | `800 MB` | 3 GB | Mobile-Optimized Conversational Engine |
+| **Microsoft Phi-3 Mini 4K** | LLM | Q4 GGUF | `2,200 MB` | 6 GB | Deep Mathematical & Logical Reasoning |
+| **TinyLlama 1.1B Chat** | LLM | Q4_K_M GGUF | `669 MB` | 2 GB | Zero-Lag Ultra-Light Casual Chat |
+| **Kokoro 82M Neural Voice** | TTS | ONNX Model | `147 MB` | 2 GB | Hyper-Realistic Offline Voice Synthesis |
+| **Whisper Tiny** | STT | ggml .bin | `75 MB` | 2 GB | Real-time Offline Speech-to-Text |
+
+---
+
+### ❤️ 3. Ultra-Human Emotional Offline Companion
+When disconnected from the internet and with no downloaded weights, ZEE and ZHEE activate `OfflineConversationalBrain.kt` to behave as genuine, empathetic human companions:
+- **🕊️ Heartfelt Comfort:** If you are feeling down, stressed, heartbroken, crying, or depressed, ZEE and ZHEE offer deep reassurance, perspective, and comforting words that never repeat.
+- **☕ Witty Banter & Anti-Boredom:** Relatable Bengali jokes, witty counter-questions, and philosophical thought experiments to keep you smiling.
+- **📖 Kobita & Shayeri Recitation:** Deep Bengali poetry (rain, loneliness, night, morning light) and soulful Urdu/Hindi couplets.
+- **🔥 Fire Resilience Speeches:** Hard-hitting motivational talks to get you back on your feet.
+- **⚡ Instant Barge-In:** Tap the mic or speaking indicator to instantly cut off TTS and take over.
+
+---
+
+### 🎨 4. Obsidian Noir Adaptive Icon & In-App Brand Emblem
+- **Geometric Monogram:** Center-split "Z" forged with dark brushed titanium and an electric cobalt-cyan (`#00F0FF` -> `#2F80FF`) diagonal plasma energy slash.
+- **Architectural Lighting:** Fine cinema camera aperture rim arcs, subtle ambient core bloom, and horizontal anamorphic lens flare.
+- **Material You Support:** Includes `ic_launcher_monochrome.xml` for Android 13/14/15 themed launcher icons.
+- **In-App Branding:** Matching circular dark glass badge with glowing cyan rim in top app bar and drawer header.
+
+---
+
+## 🛠️ Complete Native Studio Matrix
+
+| Studio Console | Core Engine & Protocols | Native Capabilities |
+| :--- | :--- | :--- |
+| **🎬 ZEE Cinema** | Veo 2 / Sora / Kling / Multimodal Vision | Scene-by-scene video prompts, strict face reference identity lock, shot lists, 3-point lighting |
+| **📺 YouTube Studio** | OAuth 2.0 PKCE • YouTube Data API v3 | Upload queue management, viral titles, automated tags/descriptions, analytics digestion |
+| **📂 Universal SAF Reader** | Storage Access Framework • Document Tree | Instant parsing of PDF, DOCX, XLSX, PPTX, CSV, TXT, SRT, VTT, Images & Audio |
+| **🏛️ The AI Council** | Gemini Pro / Flash / Local LLMs | Multi-agent synthetic deliberation between ZEE, ZHEE, and Cloud/Local models |
+| **📡 Research Radar** | Gemini Live Search Grounding | Real-time trend discovery with live clickable citations |
+| **🧠 Memory Vault** | Room SQLite • Hardware Keystore | Persistent long-term creative and conversation memory |
+
+---
+
+## 🗺️ Modular Clean Architecture (`com.zeeai.companion`)
 
 <p align="center">
   <img src="assets/architecture-map.svg" alt="ZEE AI Modular Clean Architecture" width="100%" />
 </p>
 
-| Package / Domain | Architectural Responsibilities | Key Native Implementations |
-| :--- | :--- | :--- |
-| **`accessibility/`** | Native OS control, live UI node inspection, programmatic gestures | `ZeeAccessibilityService`, `ActionExecutor`, `UIHierarchyScanner` |
-| **`ai/`** | Online Gemini streaming, on-device MediaPipe inference & AI Council | `GeminiClient`, `MediaPipeEngine`, `CouncilOrchestrator` |
-| **`persona/`** | Dual-core identity management (ZEE Operational vs. ZHEE Creative) | `PersonaManager`, `ZeePersona`, `ZheePersona` |
-| **`studio/`** | Filmmaker storyboards, YouTube Data API v3, Universal SAF reader | `StoryboardEngine`, `YouTubeClient`, `SafDocumentReader` |
-| **`voice/`** | Low-power hotword wake detection, PCM streams & persona TTS | `HotwordDetector`, `VoiceRecorder`, `SpeechSynthesizer` |
-| **`data/`** | Persistent Room DB state, conversation memory & Android Keystore | `ZeeDatabase`, `MemoryDao`, `ConversationEntity` |
-| **`ui/`** | 100% Jetpack Compose single-activity interface & obsidian components | `theme/`, `components/`, `screens/`, `MainActivity` |
-
-<details>
-<summary><b>📂 Expand Complete Directory Tree (.kt / .xml / .kts)</b></summary>
-<br/>
-
 ```text
 zee-ai/
 ├── app/
-│   ├── src/
-│   │   ├── main/
-│   │   │   ├── AndroidManifest.xml              # AccessibilityService, Audio & Service declarations
-│   │   │   ├── res/                             # Vector drawables, raw configs & theme values
-│   │   │   └── java/com/zeeai/companion/
-│   │   │       ├── accessibility/               # Native OS Accessibility Control
-│   │   │       │   ├── ZeeAccessibilityService.kt   # System event observer & Node tree traverser
-│   │   │       │   ├── ActionExecutor.kt            # Dispatcher for taps, swipes & gestures
-│   │   │       │   └── UIHierarchyScanner.kt        # AccessibilityNodeInfo extractor & parser
-│   │   │       ├── ai/                          # Dual Brain Orchestration
-│   │   │       │   ├── online/                  # Gemini streaming & Search Grounding
-│   │   │       │   │   ├── GeminiClient.kt
-│   │   │       │   │   └── SearchGroundingWrapper.kt
-│   │   │       ├── offline/                 # On-device MediaPipe & LiteRT inference
-│   │   │       │   ├── MediaPipeEngine.kt
-│   │   │       │   └── ModelDownloader.kt
-│   │   │       └── council/                 # Multi-persona debate arbitration
-│   │   │           └── CouncilOrchestrator.kt
-│   │   │       ├── data/                        # Persistence & System Repositories
-│   │   │       │   ├── local/                   # Room DB entities & DAOs
-│   │   │       │   ├── ZeeDatabase.kt
-│   │   │       │   ├── MemoryDao.kt
-│   │   │       │   └── ConversationEntity.kt
-│   │   │       └── repository/              # Unified AI & Device Repository bindings
-│   │   │       ├── persona/                     # Identity, Voices & Prompt Profiles
-│   │   │       │   ├── PersonaManager.kt        # ZEE vs. ZHEE voice/behavior switch engine
-│   │   │       │   ├── ZeePersona.kt            # System Architect persona definition
-│   │   │       │   └── ZheePersona.kt           # Cinematic Auteur persona definition
-│   │   │       ├── studio/                      # Creative & Integration Tooling
-│   │   │       │   ├── filmmaker/               # Storyboarding, scene decks & scripts
-│   │   │       │   ├── youtube/                 # YouTube Data API client & metrics
-│   │   │       │   └── saf/                     # Storage Access Framework document reader
-│   │   │       ├── voice/                       # Audio Capture & Text-to-Speech
-│   │   │       │   ├── HotwordDetector.kt       # Continuous low-power listening
-│   │   │       │   ├── VoiceRecorder.kt         # AudioRecord PCM stream processor
-│   │   │       │   └── SpeechSynthesizer.kt     # Low-latency persona TTS engine
-│   │   │       └── ui/                          # 100% Jetpack Compose / M3 Interface
-│   │   │           ├── theme/                   # Noir Obsidian color palette & typography
-│   │   │           ├── components/              # Animated waveforms, radar reticles, meters
-│   │   │           ├── screens/                 # Chat, Council, Studio & Accessibility consoles
-│   │   │           └── MainActivity.kt          # Single-Activity compose root
-│   │   └── test/                                # Unit tests (JUnit 5 + MockK)
-│   └── build.gradle.kts                         # Android build config & dependency tree
-├── .github/
-│   └── workflows/
-│       └── build-apk.yml                        # Cloud automated APK build pipeline
-├── assets/
-│   ├── hero-banner.svg                          # Keyframe animated Obsidian Noir SVG banner
-│   ├── persona-status.svg                       # Live dual-persona state indicator
-│   ├── feature-matrix.svg                       # Visual capabilities matrix with vector cards
-│   ├── architecture-map.svg                     # Vector architectural tiers & modular packages
-│   ├── pipeline.svg                             # Animated cloud APK build & CI/CD pipeline
-│   ├── install-guide.svg                        # Step-by-step phone onboarding cards
-│   └── security-grid.svg                        # Zero telemetry & biometric security badges
-├── build.gradle.kts                             # Top-level Gradle script
-└── settings.gradle.kts
+│   ├── src/main/
+│   │   ├── AndroidManifest.xml              # AccessibilityService, Audio & Service declarations
+│   │   ├── res/
+│   │   │   ├── drawable/                    # ic_launcher_background, foreground, monochrome
+│   │   │   ├── mipmap-anydpi-v26/           # Adaptive launcher & round icon vectors
+│   │   │   └── xml/                         # Accessibility service configs
+│   │   └── java/com/zeeai/companion/
+│   │       ├── ai/                          # GeminiNativeClient (SSE Streaming, Multimodal, Search Grounding)
+│   │       ├── automation/                  # ZeeAccessibilityService & NativePhoneCommander
+│   │       ├── data/local/                  # Room ZeeDatabase, MemoryDao, SecureKeyVault (Keystore AES-256)
+│   │       ├── offline/                     # OfflineModelStoreManager, OfflineConversationalBrain, LocalLlmInferenceEngine
+│   │       ├── studios/
+│   │       │   ├── filmmaker/               # FilmmakerStudioScreen (Video Gen, Face Lock, Shot List)
+│   │       │   ├── reader/                  # UniversalReaderScreen & AndroidFileParser
+│   │       │   ├── youtube/                 # YouTubeStudioScreen, YouTubeApiClient, YouTubeAuthManager
+│   │       │   ├── research/                # ResearchAndTrendsScreen
+│   │       │   └── council/                 # AICouncilScreen
+│   │       ├── ui/                          # ZeeNativeApp (Compose Theme, TopBar Emblem, Navigation)
+│   │       └── voice/                       # NativeVoiceController, WakeWordForegroundService, WakeWordEventBus
+│   └── build.gradle.kts                     # SDK 35, Compose BOM, Room KSP, MediaPipe GenAI
+└── .github/workflows/build-apk.yml           # Automated GitHub Actions APK assembly
 ```
-
-</details>
 
 ---
 
-## Automated Cloud APK Build & Pipeline
-
-No Android Studio or local toolchain required to compile release builds. The repository includes a GitHub Actions continuous integration pipeline that compiles, signs, and packages release APKs directly in the cloud.
+## ⚙️ Automated Cloud APK Build Pipeline
 
 <p align="center">
   <img src="assets/pipeline.svg" alt="Automated Cloud APK Build Pipeline" width="100%" />
 </p>
 
-### CI/CD Pipeline Automation Specifications
-
-| Pipeline Stage | Implementation Runtime | Security &amp; Verification |
+| Pipeline Stage | Runtime Environment | Security & Output |
 | :--- | :--- | :--- |
-| **Cloud Runner** | Ubuntu Latest • JDK 17 (Temurin) | Android SDK Build-Tools 34.0.0 |
-| **Compilation** | `./gradlew assembleRelease` | Non-daemon execution with full stacktrace |
-| **APK Signing** | `apksigner` Keystore • Debug Fallback | Encrypted Base64 secret resolution |
-| **Distribution** | GitHub Artifacts &amp; Releases | Automated zip packaging (14-day retention) |
-
-<details>
-<summary><b>⚙️ View Automation Workflow Script (<code>.github/workflows/build-apk.yml</code>)</b></summary>
-<br/>
-
-```yaml
-name: Build & Package Zee AI APK
-
-on:
-  push:
-    branches: [ "main" ]
-    tags: [ "v*" ]
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  build:
-    name: Assemble & Sign Android APK
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Java Development Kit (JDK 17)
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-          cache: 'gradle'
-
-      - name: Grant Execute Permission to Gradle Wrapper
-        run: chmod +x gradlew
-
-      - name: Compile Release APK
-        run: ./gradlew assembleRelease --stacktrace --no-daemon
-
-      - name: Sign APK (Production / Debug Fallback)
-        id: sign_apk
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "[*] Decoding production signing keystore..."
-            echo "$KEYSTORE_BASE64" | base64 --decode > app/keystore.jks
-            $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
-              --ks app/keystore.jks \
-              --ks-key-alias "$KEY_ALIAS" \
-              --ks-pass pass:"$KEYSTORE_PASSWORD" \
-              --key-pass pass:"$KEY_PASSWORD" \
-              --out app/build/outputs/apk/release/zee-ai-release-signed.apk \
-              app/build/outputs/apk/release/app-release-unsigned.apk
-            echo "apk_path=app/build/outputs/apk/release/zee-ai-release-signed.apk" >> $GITHUB_OUTPUT
-          else
-            echo "[!] No signing keystore secret detected. Outputting unsigned build artifact."
-            cp app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/zee-ai-release-unsigned.apk
-            echo "apk_path=app/build/outputs/apk/release/zee-ai-release-unsigned.apk" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Upload APK to Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: zee-ai-${{ github.sha }}
-          path: ${{ steps.sign_apk.outputs.apk_path }}
-          retention-days: 14
-
-      - name: Create GitHub Release (Git Tag Only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ steps.sign_apk.outputs.apk_path }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-```
-
-</details>
+| **Runner** | Ubuntu Latest • JDK 17 (Temurin) | Android SDK Build-Tools 35.0.0 |
+| **Compilation** | `./gradlew assembleDebug` | Auto-signed debug package; directly installable |
+| **Packaging** | Automated file renaming | Standardized output: `zee-ai.apk` |
+| **Distribution** | GitHub Releases (`v1.0.0`) & Artifacts | Instant direct download with SHA-256 checksum verification |
 
 ---
 
-## Direct Phone Installation Guide
+## 📖 Direct Phone Onboarding & Setup
 
 <p align="center">
   <img src="assets/install-guide.svg" alt="Direct Phone Installation Guide" width="100%" />
 </p>
 
-### 1. Trigger Cloud Build
-Push a new commit to `main`, push a release tag, or trigger a manual build in GitHub:
-```bash
-# Push release version tag
-git tag v1.0.0 && git push origin v1.0.0
-```
-*(Or navigate to the **Actions** tab on GitHub, select **Build & Package Zee AI APK**, and click **Run workflow**).*
-
-### 2. Sideload & First-Launch Handshake
-1. **Extract & Install:** Extract the downloaded `.zip` using your device file manager and tap `zee-ai-release.apk` (allow unknown source installation if prompted).
-2. **Audio Stream Perms:** On first launch, grant **Microphone** permission for low-power hotword detection and real-time speech recognition.
-3. **OS Control Activation:** Open **Android Settings ➔ Accessibility ➔ Downloaded Apps ➔ Enable 'ZEE AI System Service'**.
-4. **Configure Neural Core:** Navigate to **Settings ➔ Neural Engine** to paste your Gemini API Key (or let the app default to the on-device MediaPipe model).
+1. **Download & Install:**
+   - Tap **[zee-ai.apk](https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk)** to download.
+   - Tap the APK file in your phone's notification bar or Files app and allow installation.
+2. **Grant Microphone Permission:**
+   - On first launch, grant **Microphone** permission for voice recognition and hotword detection ("Hey Zee", "Zee", "ZHEE").
+3. **Enable OS Accessibility Control (Optional for Phone Actions):**
+   - Open **Settings ➔ Accessibility ➔ Downloaded Apps ➔ Enable 'ZEE AI System Service'**.
+   - This allows ZEE to launch apps, read screen text, set alarms, and draft WhatsApp messages by voice.
+4. **Connect Google AI Studio API Key (Instant Auto-Detect):**
+   - Open the **Settings** tab in the app.
+   - Paste your free API key from [Google AI Studio](https://aistudio.google.com/).
+   - Live Model Discovery will automatically validate the key, display a green verified badge, and configure the best Flash & Pro models.
 
 ---
 
-## Security & Sovereignty Principles
+## 🛡️ Security & Privacy Guarantees
 
 <p align="center">
   <img src="assets/security-grid.svg" alt="Security & Sovereignty Principles" width="100%" />
 </p>
 
 > [!IMPORTANT]
-> - **Zero Telemetry Guarantee:** ZEE AI contains no third-party tracking libraries, Firebase Analytics, crash loggers, or advertisement SDKs. All analytics and logs remain strictly inside the local SQLite Room DB.
-> - **Biometric Action Interceptors:** Any AccessibilityService action that accesses banking or payment gateways, changes lock screen settings, or uninstalls applications triggers an obligatory hardware `BiometricPrompt` before the gesture is executed.
-> - **Physical Hardware Mute:** The audio recording pipeline uses standard Android audio notification icons; when paused, the foreground service immediately releases the physical microphone.
+> - **Zero Third-Party Telemetry:** ZEE AI contains zero Google Analytics, Firebase tracking, advertising SDKs, or third-party diagnostic loggers. Everything stays on your device.
+> - **Hardware Keystore Vault:** API keys and OAuth tokens are encrypted using **AES-256-GCM** with master keys stored inside the physical Android Hardware Keystore (`EncryptedSharedPreferences`).
+> - **Sensitive Field Redaction:** `ZeeAccessibilityService` automatically detects and completely skips all password, PIN, and sensitive credential fields.
+> - **Physical Mic Indicator:** Android 12+ green microphone indicator lights up transparently whenever the wake word or voice recognizer is active.
 
 ---
 
@@ -297,6 +245,6 @@ git tag v1.0.0 && git push origin v1.0.0
 </p>
 
 **`zeehadhaque/zee-ai`** • Native Android Intelligence System  
-Designed with Kotlin 2.0 &amp; Material 3 • Distributed under the Apache 2.0 License.
+Designed with Kotlin 2.0 & Jetpack Compose Material 3 • Distributed under the Apache 2.0 License.
 
 </div>
