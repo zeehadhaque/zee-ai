@@ -137,7 +137,18 @@ No Android Studio or local toolchain required to compile release builds. The rep
   <img src="assets/pipeline.svg" alt="Automated Cloud APK Build Pipeline" width="100%" />
 </p>
 
-### GitHub Actions Workflow: `.github/workflows/build-apk.yml`
+### CI/CD Pipeline Automation Specifications
+
+| Pipeline Stage | Implementation Runtime | Security &amp; Verification |
+| :--- | :--- | :--- |
+| **Cloud Runner** | Ubuntu Latest • JDK 17 (Temurin) | Android SDK Build-Tools 34.0.0 |
+| **Compilation** | `./gradlew assembleRelease` | Non-daemon execution with full stacktrace |
+| **APK Signing** | `apksigner` Keystore • Debug Fallback | Encrypted Base64 secret resolution |
+| **Distribution** | GitHub Artifacts &amp; Releases | Automated zip packaging (14-day retention) |
+
+<details>
+<summary><b>⚙️ View Automation Workflow Script (<code>.github/workflows/build-apk.yml</code>)</b></summary>
+<br/>
 
 ```yaml
 name: Build & Package Zee AI APK
@@ -217,6 +228,8 @@ jobs:
           prerelease: false
           generate_release_notes: true
 ```
+
+</details>
 
 ---
 
