@@ -183,27 +183,6 @@ zee-ai/
 
 ---
 
-## 📖 Direct Phone Onboarding & Setup
-
-<p align="center">
-  <img src="assets/install-guide.svg" alt="Direct Phone Installation Guide" width="100%" />
-</p>
-
-1. **Download & Install:**
-   - Tap **[zee-ai.apk](https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk)** to download.
-   - Tap the APK file in your phone's notification bar or Files app and allow installation.
-2. **Grant Microphone Permission:**
-   - On first launch, grant **Microphone** permission for voice recognition and hotword detection ("Hey Zee", "Zee", "ZHEE").
-3. **Enable OS Accessibility Control (Optional for Phone Actions):**
-   - Open **Settings ➔ Accessibility ➔ Downloaded Apps ➔ Enable 'ZEE AI System Service'**.
-   - This allows ZEE to launch apps, read screen text, set alarms, and draft WhatsApp messages by voice.
-4. **Connect Google AI Studio API Key (Instant Auto-Detect):**
-   - Open the **Settings** tab in the app.
-   - Paste your free API key from [Google AI Studio](https://aistudio.google.com/).
-   - Live Model Discovery will automatically validate the key, display a green verified badge, and configure the best Flash & Pro models.
-
----
-
 ## 🛡️ Security & Privacy Guarantees
 
 <p align="center">
