@@ -268,13 +268,7 @@ git tag v1.0.0 && git push origin v1.0.0
 ```
 *(Or navigate to the **Actions** tab on GitHub, select **Build & Package Zee AI APK**, and click **Run workflow**).*
 
-### 2. Download APK Artifact
-1. Open Chrome or your mobile browser on your Android device.
-2. Navigate to [`https://github.com/zeehadhaque/zee-ai/actions`](https://github.com/zeehadhaque/zee-ai/actions).
-3. Tap on the latest completed workflow run.
-4. Scroll to the **Artifacts** section at the bottom and tap `zee-ai-<sha>` to download the compressed `.zip`.
-
-### 3. Sideload & First-Launch Handshake
+### 2. Sideload & First-Launch Handshake
 1. **Extract & Install:** Extract the downloaded `.zip` using your device file manager and tap `zee-ai-release.apk` (allow unknown source installation if prompted).
 2. **Audio Stream Perms:** On first launch, grant **Microphone** permission for low-power hotword detection and real-time speech recognition.
 3. **OS Control Activation:** Open **Android Settings ➔ Accessibility ➔ Downloaded Apps ➔ Enable 'ZEE AI System Service'**.
