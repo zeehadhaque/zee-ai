@@ -120,7 +120,9 @@ zee-ai/
 │   ├── hero-banner.svg                          # Keyframe animated Obsidian Noir SVG banner
 │   ├── persona-status.svg                       # Live dual-persona state indicator
 │   ├── feature-matrix.svg                       # Visual capabilities matrix with vector cards
-│   └── pipeline.svg                             # Animated cloud APK build & CI/CD pipeline
+│   ├── pipeline.svg                             # Animated cloud APK build & CI/CD pipeline
+│   ├── install-guide.svg                        # Step-by-step phone onboarding cards
+│   └── security-grid.svg                        # Zero telemetry & biometric security badges
 ├── build.gradle.kts                             # Top-level Gradle script
 └── settings.gradle.kts
 ```
@@ -216,34 +218,57 @@ jobs:
           generate_release_notes: true
 ```
 
-### Direct Phone Installation Guide
+---
 
-1. **Trigger Cloud Build:** Push a new commit to `main`, push a release tag (e.g. `git tag v1.0.0 && git push origin v1.0.0`), or tap **Run workflow** under the **Actions** tab on GitHub.
-2. **Download Artifact:**
-   - On your Android phone, open Chrome and navigate to `https://github.com/zeehadhaque/zee-ai/actions`.
-   - Tap the completed workflow run.
-   - Under the **Artifacts** section at the bottom, tap `zee-ai-<sha>` to download the compressed `.zip` containing the APK.
-3. **Sideload & Permissions:**
-   - Extract the `.zip` archive using your device file manager and tap `zee-ai-release.apk`.
-   - Allow installation from unknown sources if prompted by Android package installer.
-   - On first launch:
-     1. Grant **Microphone** permission (required for hotword recognition and speech streaming).
-     2. Open **Android Settings → Accessibility → Downloaded Apps → Enable 'ZEE AI System Service'** (required for native phone control).
-     3. Insert your Gemini API Key in **Settings → Neural Engine** (or let the app default to the on-device MediaPipe model).
+## Direct Phone Installation Guide
+
+<p align="center">
+  <img src="assets/install-guide.svg" alt="Direct Phone Installation Guide" width="100%" />
+</p>
+
+### 1. Trigger Cloud Build
+Push a new commit to `main`, push a release tag, or trigger a manual build in GitHub:
+```bash
+# Push release version tag
+git tag v1.0.0 && git push origin v1.0.0
+```
+*(Or navigate to the **Actions** tab on GitHub, select **Build & Package Zee AI APK**, and click **Run workflow**).*
+
+### 2. Download APK Artifact
+1. Open Chrome or your mobile browser on your Android device.
+2. Navigate to [`https://github.com/zeehadhaque/zee-ai/actions`](https://github.com/zeehadhaque/zee-ai/actions).
+3. Tap on the latest completed workflow run.
+4. Scroll to the **Artifacts** section at the bottom and tap `zee-ai-<sha>` to download the compressed `.zip`.
+
+### 3. Sideload & First-Launch Handshake
+1. **Extract & Install:** Extract the downloaded `.zip` using your device file manager and tap `zee-ai-release.apk` (allow unknown source installation if prompted).
+2. **Audio Stream Perms:** On first launch, grant **Microphone** permission for low-power hotword detection and real-time speech recognition.
+3. **OS Control Activation:** Open **Android Settings ➔ Accessibility ➔ Downloaded Apps ➔ Enable 'ZEE AI System Service'**.
+4. **Configure Neural Core:** Navigate to **Settings ➔ Neural Engine** to paste your Gemini API Key (or let the app default to the on-device MediaPipe model).
 
 ---
 
 ## Security & Sovereignty Principles
 
-- **Zero Telemetry:** ZEE AI contains no third-party tracking libraries, Firebase Analytics, crash loggers, or advertisement SDKs.
-- **Biometric Action Interceptors:** Any AccessibilityService action that accesses payment gateways, changes lock screen settings, or uninstalls applications triggers an obligatory hardware `BiometricPrompt` before the gesture is executed.
-- **Physical Mute:** The audio recording pipeline uses standard Android audio notification icons; when paused, the foreground service releases the hardware microphone immediately.
+<p align="center">
+  <img src="assets/security-grid.svg" alt="Security & Sovereignty Principles" width="100%" />
+</p>
+
+> [!IMPORTANT]
+> - **Zero Telemetry Guarantee:** ZEE AI contains no third-party tracking libraries, Firebase Analytics, crash loggers, or advertisement SDKs. All analytics and logs remain strictly inside the local SQLite Room DB.
+> - **Biometric Action Interceptors:** Any AccessibilityService action that accesses banking or payment gateways, changes lock screen settings, or uninstalls applications triggers an obligatory hardware `BiometricPrompt` before the gesture is executed.
+> - **Physical Hardware Mute:** The audio recording pipeline uses standard Android audio notification icons; when paused, the foreground service immediately releases the physical microphone.
 
 ---
 
 <div align="center">
 
+<p align="center">
+  <img src="https://img.shields.io/badge/License-Apache_2.0-060913?style=for-the-badge&logo=apache&logoColor=D22128&labelColor=060913" alt="Apache 2.0 License" />
+  <img src="https://img.shields.io/badge/Author-Zeehad_Haque-060913?style=for-the-badge&logo=github&logoColor=FFFFFF&labelColor=060913" alt="Author" />
+</p>
+
 **`zeehadhaque/zee-ai`** • Native Android Intelligence System  
-Designed with Kotlin &amp; Material 3 • Distributed under the Apache 2.0 License.
+Designed with Kotlin 2.0 &amp; Material 3 • Distributed under the Apache 2.0 License.
 
 </div>
