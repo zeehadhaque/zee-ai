@@ -21,9 +21,9 @@
     <img src="https://img.shields.io/badge/Package-zee--ai.apk-00F0FF?style=for-the-badge&logo=android&logoColor=white&labelColor=060913" alt="Package" />
   </a>
   <a href="https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk">
-    <img src="https://img.shields.io/badge/Size-29.6_MB-10B981?style=for-the-badge&logo=googleplay&logoColor=white&labelColor=060913" alt="Size" />
+    <img src="https://img.shields.io/badge/Size-29.95_MB-10B981?style=for-the-badge&logo=googleplay&logoColor=white&labelColor=060913" alt="Size" />
   </a>
-  <img src="https://img.shields.io/badge/Platform-Android_8.0_%E2%80%93_15%2B_(API_26--35)-060913?style=for-the-badge&logo=android&logoColor=3DDC84&labelColor=060913" alt="Platform" />
+  <img src="https://img.shields.io/badge/Platform-Android_8.0_%E2%80%93_17%2B_(API_26--36%2B)-060913?style=for-the-badge&logo=android&logoColor=3DDC84&labelColor=060913" alt="Platform" />
   <img src="https://img.shields.io/badge/Language-Kotlin_2.0-060913?style=for-the-badge&logo=kotlin&logoColor=7F52FF&labelColor=060913" alt="Kotlin" />
   <img src="https://img.shields.io/badge/UI-Jetpack_Compose_Material_3-060913?style=for-the-badge&logo=jetpackcompose&logoColor=4285F4&labelColor=060913" alt="Compose" />
   <img src="https://img.shields.io/badge/Security-AES--256--GCM_Keystore-F59E0B?style=for-the-badge&logo=securityscorecard&logoColor=white&labelColor=060913" alt="Security" />

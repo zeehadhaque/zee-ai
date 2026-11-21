@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zeeai.companion.ai.GeminiNativeClient
@@ -33,6 +34,11 @@ import com.zeeai.companion.offline.LocalLlmInferenceEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.util.UUID
 
 private val BgNavy = Color(0xFF060913)
@@ -174,6 +180,94 @@ fun FilmmakerStudioScreen(
             }.onFailure { err ->
                 withContext(Dispatchers.Main) {
                     statusText = "Export failed: ${err.message}"
+                }
+            }
+        }
+    }
+
+    var activeEngineProvider by remember { mutableStateOf(keyVault.getKey("cinema_active_provider").ifBlank { "gemini" }) } // "gemini" | "flow"
+    var showAccountConfig by remember { mutableStateOf(false) }
+
+    var geminiKeyInput by remember { mutableStateOf(keyVault.getKey("gemini_api_key")) }
+    var flowKeyInput by remember { mutableStateOf(keyVault.getKey("flow_api_key")) }
+    var flowEndpointInput by remember { mutableStateOf(keyVault.getKey("flow_endpoint").ifBlank { "https://api.flow.ai/v1/video/generations" }) }
+    var flowModelInput by remember { mutableStateOf(keyVault.getKey("flow_model_id").ifBlank { "veo-2-flow-master" }) }
+
+    fun dispatchToFlowApi(promptText: String) {
+        val flowKey = keyVault.getKey("flow_api_key")
+        val endpoint = keyVault.getKey("flow_endpoint").ifBlank { "https://api.flow.ai/v1/video/generations" }
+        val model = keyVault.getKey("flow_model_id").ifBlank { "veo-2-flow-master" }
+
+        if (!isOnline()) {
+            statusText = "Connect to internet to dispatch to Flow account."
+            return
+        }
+        if (flowKey.isBlank()) {
+            statusText = "Please enter your Flow Account API Key first."
+            showAccountConfig = true
+            return
+        }
+
+        busy = true
+        statusText = "Dispatching to Flow AI Video Engine ($model)..."
+
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val client = OkHttpClient()
+                val payload = JSONObject().apply {
+                    put("model", model)
+                    put("prompt", promptText)
+                    put("aspect_ratio", aspectRatio.substringBefore(" ").trim())
+                    put("engine", videoEngine)
+                    if (characterName.isNotBlank()) put("character_lock", characterName)
+                    if (faceReferenceFileName != null) put("face_reference_file", faceReferenceFileName)
+                }
+
+                val req = Request.Builder()
+                    .url(endpoint)
+                    .header("Authorization", "Bearer $flowKey")
+                    .header("Content-Type", "application/json")
+                    .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                client.newCall(req).execute().use { resp ->
+                    val body = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) {
+                        throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+                    }
+                    body
+                }
+            }.onSuccess { respStr ->
+                withContext(Dispatchers.Main) {
+                    busy = false
+                    statusText = "Flow generation job dispatched successfully!"
+                    output = buildString {
+                        append("=== FLOW AI VIDEO JOB DISPATCHED ===\n")
+                        append("Provider: Flow Video Engine\n")
+                        append("Model: $model\n")
+                        append("Status: Queued / Dispatched\n\n")
+                        append("--- Server Response ---\n")
+                        append(respStr)
+                        append("\n\n--- Prompt Dispatched ---\n")
+                        append(promptText)
+                    }
+                    Toast.makeText(context, "Flow AI Video Dispatched!", Toast.LENGTH_SHORT).show()
+                }
+            }.onFailure { err ->
+                withContext(Dispatchers.Main) {
+                    busy = false
+                    statusText = "Flow dispatch notice: ${err.message}"
+                    output = buildString {
+                        append("=== FLOW DIRECT PAYLOAD READY ===\n")
+                        append("Endpoint: $endpoint\n")
+                        append("Notice: ${err.message?.take(90)}\n\n")
+                        append("{\n")
+                        append("  \"model\": \"$model\",\n")
+                        append("  \"aspect_ratio\": \"${aspectRatio.substringBefore(" ").trim()}\",\n")
+                        append("  \"engine\": \"$videoEngine\",\n")
+                        append("  \"prompt\": ${JSONObject.quote(promptText)}\n")
+                        append("}\n")
+                    }
                 }
             }
         }
@@ -350,6 +444,156 @@ fun FilmmakerStudioScreen(
                         onClick = { selectedModule = mod },
                         label = { Text("${mod.icon} ${mod.label}", fontSize = 12.sp) }
                     )
+                }
+            }
+        }
+
+        // AI Video Engine & Account Connection Card (Gemini & Flow Account)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(CardNavy, RoundedCornerShape(16.dp))
+                .border(
+                    1.dp,
+                    if (if (activeEngineProvider == "gemini") geminiKeyInput.isNotBlank() else flowKeyInput.isNotBlank())
+                        NeonEmerald.copy(alpha = 0.5f)
+                    else
+                        ElectricBlue.copy(alpha = 0.3f),
+                    RoundedCornerShape(16.dp)
+                )
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("🔌", fontSize = 14.sp)
+                    Text(
+                        "AI Video Engine Connection",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                }
+                val isConnected = if (activeEngineProvider == "gemini") geminiKeyInput.isNotBlank() else flowKeyInput.isNotBlank()
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (isConnected) Color(0xFF064E3B) else Color(0xFF1E293B),
+                            RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isConnected) "● Connected" else "○ Connect Key",
+                        color = if (isConnected) NeonEmerald else Silver,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            Text(
+                "Choose your directing & video generation engine: Google Gemini (Veo 2 & Vision) or Flow Video Account.",
+                color = Silver.copy(alpha = 0.75f),
+                fontSize = 11.sp
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = activeEngineProvider == "gemini",
+                    onClick = {
+                        activeEngineProvider = "gemini"
+                        keyVault.saveKey("cinema_active_provider", "gemini")
+                    },
+                    label = { Text("🌟 Google Gemini (Veo 2)", fontSize = 11.sp) }
+                )
+                FilterChip(
+                    selected = activeEngineProvider == "flow",
+                    onClick = {
+                        activeEngineProvider = "flow"
+                        keyVault.saveKey("cinema_active_provider", "flow")
+                    },
+                    label = { Text("⚡ Flow Account", fontSize = 11.sp) }
+                )
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { showAccountConfig = !showAccountConfig }) {
+                    Text(if (showAccountConfig) "Hide" else "Config", fontSize = 11.sp)
+                }
+            }
+
+            if (showAccountConfig) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(BgNavy, RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (activeEngineProvider == "gemini") {
+                        Text("Google AI Studio (Gemini / Veo 2 Key)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        OutlinedTextField(
+                            value = geminiKeyInput,
+                            onValueChange = {
+                                geminiKeyInput = it
+                                keyVault.saveKey("gemini_api_key", it.trim())
+                            },
+                            visualTransformation = PasswordVisualTransformation(),
+                            label = { Text("Gemini API Key (AIzaSy...)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Text(
+                            if (geminiKeyInput.isNotBlank()) "✓ Key securely encrypted in Android Keystore." else "Get free key from aistudio.google.com",
+                            color = if (geminiKeyInput.isNotBlank()) NeonEmerald else Silver,
+                            fontSize = 11.sp
+                        )
+                    } else {
+                        Text("Flow Video Account Configuration", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        OutlinedTextField(
+                            value = flowKeyInput,
+                            onValueChange = {
+                                flowKeyInput = it
+                                keyVault.saveKey("flow_api_key", it.trim())
+                            },
+                            visualTransformation = PasswordVisualTransformation(),
+                            label = { Text("Flow Account API Key / Bearer Token") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = flowEndpointInput,
+                            onValueChange = {
+                                flowEndpointInput = it
+                                keyVault.saveKey("flow_endpoint", it.trim())
+                            },
+                            label = { Text("Flow Video Generation Endpoint URL") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = flowModelInput,
+                            onValueChange = {
+                                flowModelInput = it
+                                keyVault.saveKey("flow_model_id", it.trim())
+                            },
+                            label = { Text("Target Video Model ID (e.g. veo-2, kling-1.5, gen3)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Text(
+                            if (flowKeyInput.isNotBlank()) "✓ Flow account connected & encrypted in Android Keystore." else "Enter Flow API key to enable direct cloud dispatch.",
+                            color = if (flowKeyInput.isNotBlank()) NeonEmerald else Silver,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             }
         }
@@ -590,7 +834,20 @@ fun FilmmakerStudioScreen(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (activeEngineProvider == "flow" || flowKeyInput.isNotBlank()) {
+                        Button(
+                            enabled = output.isNotBlank() && !busy,
+                            onClick = { dispatchToFlowApi(output) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                        ) {
+                            Text("⚡ Flow Video", fontSize = 11.sp)
+                        }
+                    }
+
                     // Quick Copy Button for copying directly into Sora / Veo / Kling
                     OutlinedButton(
                         enabled = output.isNotBlank(),
