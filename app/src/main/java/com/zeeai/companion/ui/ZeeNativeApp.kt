@@ -123,9 +123,9 @@ fun ZeeNativeApp(
 
     val voiceProfile = remember(activeCharId) {
         if (activeCharId == "zhee") {
-            NativeVoiceProfile(languageTag = "bn-BD", pitch = 1.08f, rate = 0.98f)
+            NativeVoiceProfile(languageTag = "bn-BD", pitch = 1.18f, rate = 0.96f, isFemale = true)
         } else {
-            NativeVoiceProfile(languageTag = "bn-BD", pitch = 0.92f, rate = 1.02f)
+            NativeVoiceProfile(languageTag = "bn-BD", pitch = 0.85f, rate = 1.02f, isFemale = false)
         }
     }
 
@@ -1124,16 +1124,5 @@ fun ZeeNativeApp(
 }
 
 private fun offlineCreativeFallback(prompt: String, charId: String): String {
-    val lower = prompt.lowercase()
-    return when {
-        Regex("(kobita|কবিতা|poem)").containsMatchIn(lower) ->
-            "রাতের নীরবতা জানে সব না-বলা গল্প,\nজানালার ওপাশে জমে থাকে কুয়াশার অল্প স্বর।\nসব আলো নিভে গেলে বুঝে নিও—\nনিজের ভেতরেই জ্বলে থাকে আসল ভোর।"
-        Regex("(shayari|শায়েরি|शायरी|urdu|hindi)").containsMatchIn(lower) ->
-            "ख़ामोशियों में भी एक दास्तान छुपी होती है,\nहर टूटे हुए ख़्वाब में नई उड़ान छुपी होती है।"
-        Regex("(joke|হাসাও|funny)").containsMatchIn(lower) ->
-            "প্রোগ্রামার বলল: লাস্ট বাগটা ফিক্স করেই ঘুমাবো — সেই থেকে ৩ রাত কেটে গেছে!"
-        else ->
-            if (charId == "zhee") "এখন ইন্টারনেট নেই, আমি অফলাইনে আছি। Models ট্যাব থেকে Gemma মডেল ডাউনলোড করলে অফলাইনেও পুরো AI চ্যাট চলবে — এখন চাইলে কবিতা, শায়েরি বা ফোনের কমান্ড দিতে পারো।"
-            else "অফলাইন মোডে আছি। ফোন কন্ট্রোল (WhatsApp/YouTube/Alarm/Screen Read) আর কবিতা-শায়েরি এখনই চলবে। পুরো অফলাইন AI চ্যাটের জন্য Models ট্যাব থেকে লোকাল LLM ডাউনলোড করে নাও।"
-    }
+    return com.zeeai.companion.offline.OfflineConversationalBrain.respond(prompt, charId)
 }

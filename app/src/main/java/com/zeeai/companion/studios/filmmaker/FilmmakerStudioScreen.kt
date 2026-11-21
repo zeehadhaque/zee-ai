@@ -1,5 +1,11 @@
 package com.zeeai.companion.studios.filmmaker
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -33,46 +39,73 @@ private val BgNavy = Color(0xFF060913)
 private val CardNavy = Color(0xFF0B1120)
 private val Silver = Color(0xFFC8D1E0)
 private val ElectricBlue = Color(0xFF2F80FF)
+private val NeonEmerald = Color(0xFF10B981)
+private val CrimsonRed = Color(0xFFF87171)
 
-private data class FilmModuleSpec(
+private data class CinemaModuleSpec(
     val id: String,
     val label: String,
+    val icon: String,
     val directive: String
 )
 
-private val FILM_MODULES = listOf(
-    FilmModuleSpec(
-        "concept",
-        "Concept & Treatment",
-        "Generate: 1) Logline, 2) Synopsis, 3) 3-Act Treatment, and 4) Psychological Character Arcs."
+private val CINEMA_MODULES = listOf(
+    CinemaModuleSpec(
+        id = "video_gen",
+        label = "Realistic Video Gen",
+        icon = "🎬",
+        directive = "Generate comprehensive, ultra-photorealistic, scene-by-scene video generation prompts formatted for Sora, Google Veo 2, Runway Gen-3 Alpha, Kling 1.5, and Wan 2.1. Every scene must specify exact camera rigging, fluid physical movements, 8K optical texture, volumetric lighting, and continuous narrative flow."
     ),
-    FilmModuleSpec(
-        "screenplay",
-        "Screenplay",
-        "Write a properly formatted Fountain screenplay scene (INT./EXT. sluglines, minimalist visual action lines, silence-driven pacing, subtext-rich dialogue)."
+    CinemaModuleSpec(
+        id = "face_lock",
+        label = "Face Reference & ID Lock",
+        icon = "👤",
+        directive = "Generate strict character consistency & face reference prompts with zero facial distortion, identical bone structure, preserved facial symmetry, exact eye distance, nose bridge, jawline contours, and skin complexion across all camera angles (Close-up, Medium, Wide, Over-the-shoulder, Profile) and lighting transitions."
     ),
-    FilmModuleSpec(
-        "breakdown",
-        "Scene Breakdown",
-        "Produce a lean indie scene breakdown (Location, Time, Cast, Props, Key Action) and practical shooting schedule."
+    CinemaModuleSpec(
+        id = "shot_lighting",
+        label = "Shot List & Lighting",
+        icon = "🎥",
+        directive = "Create an auteur director's Shot List (Shot #, Angle, Framing, Lens/Focal Length, Camera Movement, Speed) and professional master lighting diagrams (Key light, Fill ratio, Rim/Kicker, Practicals, Color Temperature Kelvin, Atmospheric Volumetric Haze)."
     ),
-    FilmModuleSpec(
-        "cinematography",
-        "Shot List & Lighting",
-        "Create a detailed Shot List (Shot #, Framing, Movement, Purpose) and practical Natural-Light / Mobile Cinematography & Color Palette direction."
-    ),
-    FilmModuleSpec(
-        "sound",
-        "Sound & Edit",
-        "Design a Psychoacoustic Sound Design blueprint (room tone, foley, silence beats, J/L-cuts, score cues) and editing pacing notes."
-    ),
-    FilmModuleSpec(
-        "cinema",
-        "ZEE Cinema Analysis",
-        "Perform an auteur-level film analysis covering visual language, blocking, thematic architecture, and takeaways for independent filmmaking."
+    CinemaModuleSpec(
+        id = "cinema_analysis",
+        label = "ZEE Cinema Analysis",
+        icon = "👁️",
+        directive = "Perform deep auteur-level cinematic analysis covering visual language, mise-en-scène, camera psychology, rhythm and pacing, subtextual color theory, emotional tone curve, and practical indie directing takeaways."
     )
 )
 
+private val SCENE_LENGTHS = listOf(
+    "1 Shot (10-15s Cinematic Teaser)",
+    "3 Scenes (30-45s Continuous Story Arc)",
+    "5 Scenes (60-90s Long-Form Sequence)",
+    "Full Sequence (Multi-Scene 2-3 mins)"
+)
+
+private val VIDEO_ENGINES = listOf(
+    "Google Veo 2 (Photorealistic 8K Directing)",
+    "OpenAI Sora (Fluid Physics & Complex Moves)",
+    "Runway Gen-3 Alpha (High-Fidelity Cinema)",
+    "Kling 1.5 HD (Realistic Human Dynamics)",
+    "Wan 2.1 (Cinematic Long-Shot Master)"
+)
+
+private val ASPECT_RATIOS = listOf(
+    "2.39:1 Anamorphic Cinema Widescreen (Arri Alexa 65)",
+    "16:9 Standard Master Cinema (4K UHD)",
+    "9:16 Vertical Immersive Cinema",
+    "4:3 Vintage Academy Golden Ratio"
+)
+
+private val VISUAL_AESTHETICS = listOf(
+    "Photorealistic Live-Action (Natural Skin Pores & Light Bounce)",
+    "Dark Gritty Cinema Verite (Handheld, Natural Tungsten)",
+    "High-Fashion / Stylized Anamorphic Flares",
+    "Epic Cinematic Masterwork (Steadicam & Golden Hour)"
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FilmmakerStudioScreen(
     activeCharId: String,
@@ -86,18 +119,46 @@ fun FilmmakerStudioScreen(
     val scope = rememberCoroutineScope()
     val dao = remember { database.dao() }
 
-    var selectedModule by remember { mutableStateOf(FILM_MODULES[1]) }
+    var selectedModule by remember { mutableStateOf(CINEMA_MODULES[0]) }
     var projectTitle by remember { mutableStateOf("") }
-    var genre by remember { mutableStateOf("Psychological Thriller / Noir") }
-    var tone by remember { mutableStateOf("Dark atmospheric, natural light, silence-driven") }
+    var sceneLength by remember { mutableStateOf(SCENE_LENGTHS[1]) }
+    var videoEngine by remember { mutableStateOf(VIDEO_ENGINES[0]) }
+    var aspectRatio by remember { mutableStateOf(ASPECT_RATIOS[0]) }
+    var aesthetic by remember { mutableStateOf(VISUAL_AESTHETICS[0]) }
+    var characterName by remember { mutableStateOf("") }
     var brief by remember { mutableStateOf("") }
+
+    var faceReferenceUri by remember { mutableStateOf<Uri?>(null) }
+    var faceReferenceFileName by remember { mutableStateOf<String?>(null) }
+    var faceReferenceSize by remember { mutableStateOf(0L) }
+
     var output by remember { mutableStateOf("") }
     var statusText by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
-    // Native Android SAF export (.fountain or .md directly to phone storage)
+    // Face Reference Image Picker
+    val pickFaceImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            faceReferenceUri = uri
+            // Query display name and size
+            runCatching {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (cursor.moveToFirst()) {
+                        faceReferenceFileName = if (nameIdx != -1) cursor.getString(nameIdx) else "face_reference.jpg"
+                        faceReferenceSize = if (sizeIdx != -1) cursor.getLong(sizeIdx) else 0L
+                    }
+                }
+            }
+        }
+    }
+
+    // Android SAF export (.md or .txt directly to phone storage)
     val exportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/plain")
+        contract = ActivityResultContracts.CreateDocument("text/markdown")
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch(Dispatchers.IO) {
@@ -108,6 +169,7 @@ fun FilmmakerStudioScreen(
             }.onSuccess {
                 withContext(Dispatchers.Main) {
                     statusText = "Exported cleanly to phone storage."
+                    Toast.makeText(context, "Saved to device storage!", Toast.LENGTH_SHORT).show()
                 }
             }.onFailure { err ->
                 withContext(Dispatchers.Main) {
@@ -124,30 +186,83 @@ fun FilmmakerStudioScreen(
         statusText = "Directing ${selectedModule.label}..."
 
         val prompt = buildString {
-            append("Project Title: ${projectTitle.ifBlank { "Untitled" }}\n")
-            append("Genre: $genre\n")
-            append("Visual & Pacing Tone: $tone\n")
-            append("Deliverable: ${selectedModule.label}\n")
-            append("Directive: ${selectedModule.directive}\n\n")
-            append("Director's Brief:\n${brief.trim()}")
+            append("=== ZEE CINEMA AI STUDIO DIRECTING REQUEST ===\n")
+            append("PROJECT TITLE: ${projectTitle.ifBlank { "Untitled Masterwork" }}\n")
+            append("DELIVERABLE: ${selectedModule.label} (${selectedModule.icon})\n")
+            append("TARGET VIDEO ENGINE: $videoEngine\n")
+            append("SEQUENCE STRUCTURE: $sceneLength\n")
+            append("ASPECT RATIO & LENS: $aspectRatio\n")
+            append("VISUAL AESTHETIC & REALISM: $aesthetic\n")
+
+            if (characterName.isNotBlank() || faceReferenceUri != null) {
+                append("\n--- CHARACTER & FACE IDENTITY LOCK ---\n")
+                if (characterName.isNotBlank()) append("Character Identifier: $characterName\n")
+                if (faceReferenceUri != null) {
+                    append("FACE REFERENCE IMAGE: Attached ($faceReferenceFileName)\n")
+                    append("IDENTITY CONSTRAINT: ZERO FACIAL MORPHING. 100% preservation of facial bone structure, jawline, eye spacing, nose bridge, cheekbones, skin complexion, and micro-expressions across all scenes, angles, and lighting transitions.\n")
+                }
+            }
+
+            append("\nDIRECTIVE:\n${selectedModule.directive}\n")
+            append("\nDIRECTOR'S BRIEF & SCENE CONCEPT:\n${brief.trim()}\n")
+            append("\nFORMAT REQUIREMENTS:\n")
+            when (selectedModule.id) {
+                "video_gen" -> {
+                    append("- Output Scene-by-Scene sequential video prompts with timestamp estimates.\n")
+                    append("- Include [Scene Number], [Visual Description], [Camera Movement & Rigging], [Lighting & Color Grade], [Sound Cue / Atmosphere], and [Prompt for AI Video Model (English)].\n")
+                    append("- Ensure seamless continuity between Scene 1 -> Scene 2 -> Scene 3 with zero character drift.")
+                }
+                "face_lock" -> {
+                    append("- Detail the exact Face Consistency Matrix for AI Video & Image generators.\n")
+                    append("- Provide negative prompts to eliminate plastic skin, face morphing, asymmetry, or double eyes.\n")
+                    append("- Provide consistent camera angle prompts (Close-Up, 3/4 Profile, Dynamic Action) maintaining exact facial geometry.")
+                }
+                "shot_lighting" -> {
+                    append("- Comprehensive Shot-by-Shot Director's Sheet.\n")
+                    append("- Columns/Sections: Shot #, Framing (ECU/CU/MCU/MS/WS), Focal Length & Lens (e.g. 35mm Arri Prime), Camera Movement (Steadicam/Dolly In/Handheld).\n")
+                    append("- Master 3-Point Lighting blueprint (Key light, Fill light ratio, Rim/Backlight, Practicals, Kelvin temperature, Volumetric haze).")
+                }
+                "cinema_analysis" -> {
+                    append("- Auteur-grade visual analysis covering mise-en-scène, color theory, blocking, semiotics, pacing, and practical directing takeaways.")
+                }
+            }
         }
 
         val charName = if (activeCharId == "zhee") "ZHEE" else "ZEE"
         val sysInstruction =
-            "You are $charName inside ZEE Filmmaker Studio — an independent cinema directing, screenwriting, cinematography, and editing partner. Prioritize visual storytelling over dialogue-heavy exposition. Match the user's language (Bangla, Banglish, English, Hindi, or Urdu)."
+            "You are $charName inside ZEE Cinema & Video Generation Studio — an auteur film director, master cinematographer, and generative video expert. You specialize in ultra-realistic scene-by-scene video prompts (Veo 2, Sora, Runway, Kling, Wan 2.1), strict facial identity preservation with zero distortion, shot-by-shot lighting blueprints, and cinema analysis. Match the user's language (Bangla, Banglish, English, Hindi, or Urdu)."
 
         scope.launch {
             val apiKey = keyVault.getKey("gemini_api_key")
             val proModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" }
+
             if (isOnline() && apiKey.isNotBlank()) {
-                val result = geminiClient.streamChat(
-                    apiKey = apiKey,
-                    model = proModel,
-                    systemInstruction = sysInstruction,
-                    history = emptyList(),
-                    userPrompt = prompt,
-                    onChunk = { partial -> output = partial }
-                )
+                val result = if (faceReferenceUri != null) {
+                    // Vision multimodal pass with attached face reference
+                    val mime = context.contentResolver.getType(faceReferenceUri!!) ?: "image/jpeg"
+                    geminiClient.streamMultimodal(
+                        apiKey = apiKey,
+                        contentResolver = context.contentResolver,
+                        fileUri = faceReferenceUri,
+                        mimeType = mime,
+                        fileSizeBytes = faceReferenceSize,
+                        model = proModel,
+                        systemInstruction = sysInstruction,
+                        prompt = prompt,
+                        onStatus = { s -> statusText = s },
+                        onChunk = { partial -> output = partial }
+                    )
+                } else {
+                    geminiClient.streamChat(
+                        apiKey = apiKey,
+                        model = proModel,
+                        systemInstruction = sysInstruction,
+                        history = emptyList(),
+                        userPrompt = prompt,
+                        onChunk = { partial -> output = partial }
+                    )
+                }
+
                 result.onSuccess {
                     output = it
                     statusText = "Generated online via $proModel."
@@ -205,33 +320,126 @@ fun FilmmakerStudioScreen(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(
-                "ZEE Cinema & Filmmaker Studio",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
-            )
-            Text(
-                "Screenplays, shot lists, natural-light cinematography, psychoacoustic sound design & film analysis.",
-                color = Silver.copy(alpha = 0.75f),
-                fontSize = 12.sp
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "ZEE Cinema & Video Studio",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+                    Text(
+                        "Photorealistic scene-by-scene video gen, face reference lock, shot lists & lighting.",
+                        color = Silver.copy(alpha = 0.75f),
+                        fontSize = 11.sp
+                    )
+                }
+            }
 
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                FILM_MODULES.forEach { mod ->
+                CINEMA_MODULES.forEach { mod ->
                     FilterChip(
                         selected = selectedModule.id == mod.id,
                         onClick = { selectedModule = mod },
-                        label = { Text(mod.label, fontSize = 12.sp) }
+                        label = { Text("${mod.icon} ${mod.label}", fontSize = 12.sp) }
                     )
                 }
             }
         }
 
-        // Director Input Card
+        // Face Reference & Character Lock Card
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(CardNavy, RoundedCornerShape(16.dp))
+                .border(
+                    1.dp,
+                    if (faceReferenceUri != null) NeonEmerald.copy(alpha = 0.5f) else Silver.copy(alpha = 0.14f),
+                    RoundedCornerShape(16.dp)
+                )
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("👤", fontSize = 14.sp)
+                    Text(
+                        "Face Reference & Zero-Shape-Change Lock",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                }
+                if (faceReferenceUri != null) {
+                    Text(
+                        "LOCKED",
+                        color = NeonEmerald,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            Text(
+                "Attach a portrait photo to lock face symmetry, bone structure, and facial identity across all scenes with zero morphing.",
+                color = Silver.copy(alpha = 0.7f),
+                fontSize = 11.sp
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = { pickFaceImageLauncher.launch("image/*") },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (faceReferenceUri != null) NeonEmerald.copy(alpha = 0.2f) else ElectricBlue.copy(alpha = 0.25f),
+                        contentColor = if (faceReferenceUri != null) NeonEmerald else Color.White
+                    ),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        if (faceReferenceUri != null) "✓ Change Face Photo" else "📎 Pick Face Reference Photo",
+                        fontSize = 12.sp
+                    )
+                }
+
+                if (faceReferenceUri != null) {
+                    OutlinedButton(
+                        onClick = {
+                            faceReferenceUri = null
+                            faceReferenceFileName = null
+                            faceReferenceSize = 0L
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CrimsonRed)
+                    ) {
+                        Text("Remove", fontSize = 12.sp)
+                    }
+                }
+            }
+
+            if (faceReferenceUri != null) {
+                Text(
+                    "Attached: ${faceReferenceFileName ?: "Reference Photo"} • Facial features, nose bridge & jawline locked.",
+                    color = NeonEmerald,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        // Directing & Video Settings Card
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -243,34 +451,83 @@ fun FilmmakerStudioScreen(
             OutlinedTextField(
                 value = projectTitle,
                 onValueChange = { projectTitle = it },
-                label = { Text("Project Title") },
-                placeholder = { Text("e.g., AUTOPSY / SHADOW IV") },
+                label = { Text("Film / Sequence Title") },
+                placeholder = { Text("e.g., DHAKA NOIR / ECHOES OF SILENCE") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = genre,
-                    onValueChange = { genre = it },
-                    label = { Text("Genre") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = tone,
-                    onValueChange = { tone = it },
-                    label = { Text("Visual Tone") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
-                )
+            OutlinedTextField(
+                value = characterName,
+                onValueChange = { characterName = it },
+                label = { Text("Character Name / Details (Optional)") },
+                placeholder = { Text("e.g., Arafat, 30s detective in dark trench coat") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            // Selectable dropdowns / chips for sequence length & AI engine
+            Text("Sequence Structure & Length", color = Silver, fontSize = 12.sp)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                SCENE_LENGTHS.forEach { len ->
+                    FilterChip(
+                        selected = sceneLength == len,
+                        onClick = { sceneLength = len },
+                        label = { Text(len.substringBefore("(").trim(), fontSize = 11.sp) }
+                    )
+                }
+            }
+
+            Text("Target Video AI Engine", color = Silver, fontSize = 12.sp)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                VIDEO_ENGINES.forEach { engine ->
+                    FilterChip(
+                        selected = videoEngine == engine,
+                        onClick = { videoEngine = engine },
+                        label = { Text(engine.substringBefore("(").trim(), fontSize = 11.sp) }
+                    )
+                }
+            }
+
+            Text("Aspect Ratio & Camera Format", color = Silver, fontSize = 12.sp)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ASPECT_RATIOS.forEach { ratio ->
+                    FilterChip(
+                        selected = aspectRatio == ratio,
+                        onClick = { aspectRatio = ratio },
+                        label = { Text(ratio.substringBefore("(").trim(), fontSize = 11.sp) }
+                    )
+                }
+            }
+
+            Text("Visual Aesthetic & Realism", color = Silver, fontSize = 12.sp)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                VISUAL_AESTHETICS.forEach { aes ->
+                    FilterChip(
+                        selected = aesthetic == aes,
+                        onClick = { aesthetic = aes },
+                        label = { Text(aes.substringBefore("(").trim(), fontSize = 11.sp) }
+                    )
+                }
             }
 
             OutlinedTextField(
                 value = brief,
                 onValueChange = { brief = it },
-                label = { Text("Scene / Story Brief") },
-                placeholder = { Text("Describe the premise, scene beat, conflict, or movie to analyze...") },
+                label = { Text("Scene Concept / Director's Brief") },
+                placeholder = { Text("Describe the action, emotional tone, environment, lighting, and what happens scene by scene...") },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 4,
                 maxLines = 8
@@ -282,7 +539,10 @@ fun FilmmakerStudioScreen(
                     enabled = brief.isNotBlank() && !busy,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(if (busy) "Generating..." else "Generate ${selectedModule.label}", fontSize = 12.sp)
+                    Text(
+                        if (busy) "Directing Sequence..." else "Generate ${selectedModule.label}",
+                        fontSize = 12.sp
+                    )
                 }
                 if (busy) {
                     OutlinedButton(
@@ -290,10 +550,10 @@ fun FilmmakerStudioScreen(
                             geminiClient.cancelActive()
                             localLlm.cancelActiveGeneration()
                             busy = false
-                            statusText = "Generation cancelled."
+                            statusText = "Directing cancelled."
                         }
                     ) {
-                        Text("Stop", color = Color(0xFFF87171), fontSize = 12.sp)
+                        Text("Stop", color = CrimsonRed, fontSize = 12.sp)
                     }
                 }
             }
@@ -303,7 +563,7 @@ fun FilmmakerStudioScreen(
             }
         }
 
-        // Editable Output + SAF Export & Memory Save
+        // Editable Output + SAF Export, Copy Prompt & Memory Save
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -318,12 +578,25 @@ fun FilmmakerStudioScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "${selectedModule.label} Draft",
+                    "${selectedModule.label} Output",
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Quick Copy Button for copying directly into Sora / Veo / Kling
+                    OutlinedButton(
+                        enabled = output.isNotBlank(),
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText("ZEE Cinema Output", output)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "Copied prompts to clipboard!", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Text("Copy", fontSize = 11.sp)
+                    }
+
                     OutlinedButton(
                         enabled = output.isNotBlank(),
                         onClick = {
@@ -333,7 +606,7 @@ fun FilmmakerStudioScreen(
                                         id = UUID.randomUUID().toString(),
                                         owner = "shared",
                                         category = "creative",
-                                        content = "[Film: ${projectTitle.ifBlank { "Untitled" }} • ${selectedModule.label}] ${output.take(450)}"
+                                        content = "[Cinema: ${projectTitle.ifBlank { "Untitled" }} • ${selectedModule.label}] ${output.take(450)}"
                                     )
                                 )
                                 statusText = "Saved notes to Room Long-Term Creative Memory."
@@ -342,15 +615,15 @@ fun FilmmakerStudioScreen(
                     ) {
                         Text("Save Memory", fontSize = 11.sp)
                     }
+
                     Button(
                         enabled = output.isNotBlank(),
                         onClick = {
-                            val ext = if (selectedModule.id == "screenplay") "fountain" else "md"
                             val safeName = projectTitle
-                                .ifBlank { "zee-film" }
+                                .ifBlank { "zee-cinema" }
                                 .lowercase()
                                 .replace(Regex("[^a-z0-9]+"), "-")
-                            exportLauncher.launch("$safeName-${selectedModule.id}.$ext")
+                            exportLauncher.launch("$safeName-${selectedModule.id}.md")
                         }
                     ) {
                         Text("Export", fontSize = 11.sp)
@@ -365,13 +638,13 @@ fun FilmmakerStudioScreen(
                     .fillMaxWidth()
                     .background(BgNavy, RoundedCornerShape(12.dp)),
                 minLines = 10,
-                maxLines = 24,
+                maxLines = 28,
                 textStyle = LocalTextStyle.current.copy(
-                    fontFamily = if (selectedModule.id == "screenplay") FontFamily.Monospace else FontFamily.Default,
+                    fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
                     color = Color.White
                 ),
-                placeholder = { Text("Generated script, shot list, or analysis appears here...") }
+                placeholder = { Text("Generated scene-by-scene video prompts, face consistency matrix, shot list, or cinema analysis appears here...") }
             )
         }
     }

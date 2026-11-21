@@ -15,7 +15,8 @@ import java.util.Locale
 data class NativeVoiceProfile(
     val languageTag: String, // "bn-BD", "en-US", "hi-IN", "ur-PK"
     val pitch: Float,
-    val rate: Float
+    val rate: Float,
+    val isFemale: Boolean = false
 )
 
 class NativeVoiceController(
@@ -42,9 +43,28 @@ class NativeVoiceController(
         if (!ttsReady || text.isBlank()) return
         stopSpeaking() // Instant interruption
         val clean = text.replace(Regex("\\[.*?\\]"), "").trim()
-        tts?.language = Locale.forLanguageTag(profile.languageTag)
+        val loc = Locale.forLanguageTag(profile.languageTag)
+        tts?.language = loc
         tts?.setPitch(profile.pitch)
         tts?.setSpeechRate(profile.rate)
+
+        // Select distinct male or female voice matching the active persona
+        try {
+            tts?.voices?.let { voices ->
+                val langVoices = voices.filter { it.locale.language == loc.language }
+                val targetVoice = if (profile.isFemale) {
+                    langVoices.firstOrNull { it.name.contains("female", ignoreCase = true) || it.name.contains("-f-", ignoreCase = true) }
+                        ?: voices.firstOrNull { it.name.contains("female", ignoreCase = true) }
+                } else {
+                    langVoices.firstOrNull { it.name.contains("male", ignoreCase = true) || it.name.contains("-m-", ignoreCase = true) }
+                        ?: voices.firstOrNull { it.name.contains("male", ignoreCase = true) }
+                }
+                if (targetVoice != null) {
+                    tts?.voice = targetVoice
+                }
+            }
+        } catch (_: Exception) {}
+
         tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "zee_utt_${System.currentTimeMillis()}")
     }
 
