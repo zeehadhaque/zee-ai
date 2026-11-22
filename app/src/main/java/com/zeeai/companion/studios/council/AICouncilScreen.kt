@@ -165,11 +165,12 @@ fun AICouncilScreen(
             )
         }
         if (useFlashLite && geminiKey.isNotBlank()) {
+            val liteModel = "gemini-2.0-flash-lite"
             tasks.add(
-                Triple(flashModel, "$flashModel • Rapid Check") {
+                Triple(liteModel, "$liteModel • Rapid Check") {
                     geminiClient.generateOnce(
                         apiKey = geminiKey,
-                        model = flashModel,
+                        model = liteModel,
                         systemInstruction = "Provide the tightest high-signal summary and key trade-offs.",
                         userPrompt = question
                     )

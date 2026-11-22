@@ -218,7 +218,7 @@ class OfflineModelStoreManager(private val context: Context) {
                 if (!response.isSuccessful) {
                     val code = response.code
                     val msg = when (code) {
-                        401, 403 -> "HTTP $code: Gated model — enter access token or choose un-gated model."
+                        401, 403 -> "HTTP $code: Gated model — Go to Settings -> Connect Hugging Face with your token (and accept the license on huggingface.co)."
                         404 -> "HTTP 404: Model file not found on host."
                         429 -> "HTTP 429: Host rate limit reached. Please wait a minute."
                         else -> "HTTP $code: Server error (${response.message})"

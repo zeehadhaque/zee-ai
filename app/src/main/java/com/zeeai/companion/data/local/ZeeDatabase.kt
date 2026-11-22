@@ -84,7 +84,7 @@ abstract class ZeeDatabase : RoomDatabase() {
                     context.applicationContext,
                     ZeeDatabase::class.java,
                     "zee_ai_native.db"
-                ).build().also { instance = it }
+                ).fallbackToDestructiveMigration().build().also { instance = it }
             }
         }
     }

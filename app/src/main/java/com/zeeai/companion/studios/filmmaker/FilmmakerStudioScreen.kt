@@ -50,6 +50,11 @@ private val ElectricBlue = Color(0xFF2F80FF)
 private val NeonEmerald = Color(0xFF10B981)
 private val CrimsonRed = Color(0xFFF87171)
 
+private val cinemaHttpClient = OkHttpClient.Builder()
+    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+    .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+    .build()
+
 private data class CinemaModuleSpec(
     val id: String,
     val label: String,
@@ -230,7 +235,6 @@ fun FilmmakerStudioScreen(
 
         scope.launch(Dispatchers.IO) {
             runCatching {
-                val client = OkHttpClient()
                 val cleanRatio = if (aspectRatio.contains("9:16")) "9:16" else "16:9"
 
                 val payload = JSONObject().apply {
@@ -261,7 +265,7 @@ fun FilmmakerStudioScreen(
                         .post(payload.toString().toRequestBody("application/json".toMediaType()))
                         .build()
 
-                    client.newCall(req).execute().use { resp ->
+                    cinemaHttpClient.newCall(req).execute().use { resp ->
                         val body = resp.body?.string().orEmpty()
                         if (resp.isSuccessful) {
                             responseBody = body
@@ -331,7 +335,6 @@ fun FilmmakerStudioScreen(
 
         scope.launch(Dispatchers.IO) {
             runCatching {
-                val client = OkHttpClient()
                 val payload = JSONObject().apply {
                     put("model", model)
                     put("prompt", promptText)
@@ -348,7 +351,7 @@ fun FilmmakerStudioScreen(
                     .post(payload.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                client.newCall(req).execute().use { resp ->
+                cinemaHttpClient.newCall(req).execute().use { resp ->
                     val body = resp.body?.string().orEmpty()
                     if (!resp.isSuccessful) {
                         throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")

@@ -110,6 +110,11 @@ fun ZeeNativeApp(
     val voiceController = remember {
         NativeVoiceController(context) { speaking -> isSpeaking = speaking }
     }
+    DisposableEffect(voiceController) {
+        onDispose {
+            voiceController.shutdown()
+        }
+    }
     val isMicLockedOn by voiceController.isMicLockedOn.collectAsState()
     val voiceState by voiceController.voiceState.collectAsState()
     val isAccessibilityConnected by ZeeAccessibilityService.isConnected.collectAsState()
