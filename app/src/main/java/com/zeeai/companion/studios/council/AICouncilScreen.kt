@@ -133,8 +133,8 @@ fun AICouncilScreen(
 
         val geminiKey = keyVault.getKey("gemini_api_key")
         val backupGroq = keyVault.getKey("groq_api_key")
-        val flashModel = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
-        val secondModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-flash-lite" }
+        val flashModel = keyVault.getKey("gemini_flash_model").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
+        val secondModel = keyVault.getKey("gemini_pro_model").ifBlank { GeminiNativeClient.DEFAULT_PRO_MODEL }
 
         val tasks = mutableListOf<Triple<String, String, suspend () -> Result<String>>>()
 

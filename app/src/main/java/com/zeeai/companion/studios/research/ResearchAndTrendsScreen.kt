@@ -117,7 +117,7 @@ fun ResearchAndTrendsScreen(
         statusText = "Searching live web for: $label..."
 
         val charName = if (activeCharId == "zhee") "ZHEE" else "ZEE"
-        val activeModel = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
+        val activeModel = keyVault.getKey("gemini_flash_model").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
         val backupGroq = keyVault.getKey("groq_api_key")
         val sysInstruction =
             "You are $charName running ZEE Research Studio with live Google Search Grounding. Always perform a real web search, synthesize verified up-to-date facts with dates, and keep structure crisp. Match the user's language."

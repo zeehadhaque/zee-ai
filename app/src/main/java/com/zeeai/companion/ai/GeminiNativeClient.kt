@@ -63,12 +63,41 @@ class GeminiNativeClient {
     @Volatile
     private var activeCall: Call? = null
 
-    // Ordered high-quota Free-Tier Flash models
+    companion object {
+        val ALL_KNOWN_GEMINI_MODELS = listOf(
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-8b",
+            "gemini-1.5-flash-latest",
+            "gemini-2.0-pro-exp-02-05",
+            "gemini-2.0-flash-thinking-exp-01-21",
+            "gemini-1.5-pro",
+            "gemini-1.5-pro-latest",
+            "gemini-exp-1206",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro"
+        )
+
+        const val DEFAULT_FLASH_MODEL = "gemini-2.0-flash"
+        const val DEFAULT_PRO_MODEL = "gemini-1.5-pro"
+    }
+
+    // Ordered high-quota Free-Tier Flash models (all official latest Gemini endpoints)
     private val standardFlashPriority = listOf(
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
-        "gemini-2.0-flash-lite"
+        "gemini-1.5-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-pro",
+        "gemini-2.0-flash-exp",
+        "gemini-2.0-pro-exp-02-05",
+        "gemini-2.0-flash-thinking-exp-01-21",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-pro-latest",
+        "gemini-exp-1206",
+        "gemini-2.5-flash"
     )
 
     fun cancelActive() {
@@ -83,7 +112,12 @@ class GeminiNativeClient {
         }
 
         val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$cleanKey"
-        val request = Request.Builder().url(url).get().build()
+        val request = Request.Builder()
+            .url(url)
+            .header("x-goog-api-key", cleanKey)
+            .header("Content-Type", "application/json")
+            .get()
+            .build()
 
         try {
             client.newCall(request).execute().use { response ->
@@ -125,17 +159,21 @@ class GeminiNativeClient {
 
                 // Prioritize high-quota Free-Tier Flash models FIRST
                 val flashCandidates = discoveredList.filter { it.id.contains("flash", ignoreCase = true) }
-                val bestFlash = flashCandidates.firstOrNull { it.id.contains("2.5-flash", ignoreCase = true) && !it.id.contains("lite") }?.id
-                    ?: flashCandidates.firstOrNull { it.id.contains("2.5-flash-lite", ignoreCase = true) }?.id
-                    ?: flashCandidates.firstOrNull { it.id.contains("2.0-flash", ignoreCase = true) }?.id
+                val bestFlash = flashCandidates.firstOrNull { it.id == "gemini-2.0-flash" }?.id
+                    ?: flashCandidates.firstOrNull { it.id == "gemini-1.5-flash" }?.id
+                    ?: flashCandidates.firstOrNull { it.id.contains("2.0-flash", ignoreCase = true) && !it.id.contains("lite") }?.id
+                    ?: flashCandidates.firstOrNull { it.id.contains("1.5-flash", ignoreCase = true) && !it.id.contains("8b") }?.id
+                    ?: flashCandidates.firstOrNull { it.id.contains("2.0-flash-lite", ignoreCase = true) }?.id
+                    ?: flashCandidates.firstOrNull { it.id.contains("flash", ignoreCase = true) }?.id
                     ?: flashCandidates.firstOrNull()?.id
-                    ?: "gemini-2.5-flash"
+                    ?: DEFAULT_FLASH_MODEL
 
-                val proCandidates = discoveredList.filter { it.id.contains("pro", ignoreCase = true) }
-                val bestPro = proCandidates.firstOrNull { it.id.contains("2.5", ignoreCase = true) }?.id
-                    ?: proCandidates.firstOrNull { it.id.contains("2.0", ignoreCase = true) }?.id
+                val proCandidates = discoveredList.filter { it.id.contains("pro", ignoreCase = true) || it.id.contains("thinking", ignoreCase = true) }
+                val bestPro = proCandidates.firstOrNull { it.id.contains("2.0-pro", ignoreCase = true) }?.id
+                    ?: proCandidates.firstOrNull { it.id.contains("1.5-pro", ignoreCase = true) }?.id
+                    ?: proCandidates.firstOrNull { it.id.contains("thinking", ignoreCase = true) }?.id
                     ?: proCandidates.firstOrNull()?.id
-                    ?: bestFlash
+                    ?: DEFAULT_PRO_MODEL
 
                 Result.success(ModelDiscoveryResult(discoveredList, bestFlash, bestPro))
             }
@@ -149,35 +187,55 @@ class GeminiNativeClient {
         groqKey: String = "",
         openRouterKey: String = ""
     ): String = withContext(Dispatchers.IO) {
-        if (geminiKey.isNotBlank()) {
-            val testUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey.trim()}"
-            val testBody = JSONObject().apply {
-                put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "hi")))))
-                put("generationConfig", JSONObject().put("maxOutputTokens", 5))
-            }
-            try {
-                val req = Request.Builder().url(testUrl).post(testBody.toString().toRequestBody("application/json".toMediaType())).build()
-                client.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        return@withContext "✅ Gemini Connected: gemini-2.5-flash (Online & Active)"
-                    } else if (resp.code == 429) {
-                        // Test backup providers
-                        if (groqKey.isNotBlank()) {
-                            val groqOk = testGroq(groqKey)
-                            if (groqOk) return@withContext "⚠️ Gemini Quota Exhausted (429) • Groq Backup Connected (llama-3.3-70b)"
-                        }
-                        if (openRouterKey.isNotBlank()) {
-                            val orOk = testOpenRouter(openRouterKey)
-                            if (orOk) return@withContext "⚠️ Gemini Quota Exhausted (429) • OpenRouter Backup Connected"
-                        }
-                        return@withContext "⚠️ Gemini API Quota Exhausted (HTTP 429) — Get a new key at aistudio.google.com or add a free Groq key."
-                    } else {
-                        return@withContext "❌ Gemini Error (${resp.code}): ${resp.body?.string()?.take(100)}"
-                    }
+        val cleanKey = geminiKey.trim()
+        if (cleanKey.isNotBlank()) {
+            val candidateTestModels = listOf(
+                "gemini-2.0-flash",
+                "gemini-1.5-flash",
+                "gemini-2.0-flash-lite",
+                "gemini-1.5-pro",
+                "gemini-1.5-flash-8b",
+                "gemini-2.5-flash"
+            )
+            var lastErr = ""
+            for (testModel in candidateTestModels) {
+                val testUrl = "https://generativelanguage.googleapis.com/v1beta/models/$testModel:generateContent?key=$cleanKey"
+                val testBody = JSONObject().apply {
+                    put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "hi")))))
+                    put("generationConfig", JSONObject().put("maxOutputTokens", 5))
                 }
-            } catch (e: Exception) {
-                return@withContext "❌ Connection failed: ${e.message?.take(80)}"
+                try {
+                    val req = Request.Builder()
+                        .url(testUrl)
+                        .header("x-goog-api-key", cleanKey)
+                        .header("Content-Type", "application/json")
+                        .post(testBody.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            return@withContext "✅ Gemini Connected: $testModel (Online & Ready)"
+                        } else if (resp.code == 429) {
+                            lastErr = "⚠️ Gemini Quota Exhausted (429) on $testModel"
+                        } else {
+                            val body = resp.body?.string().orEmpty().take(120)
+                            lastErr = "HTTP ${resp.code} on $testModel: $body"
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastErr = e.message?.take(80) ?: "Network error"
+                }
             }
+
+            // Test backup providers
+            if (groqKey.isNotBlank()) {
+                val groqOk = testGroq(groqKey)
+                if (groqOk) return@withContext "⚠️ Gemini ($lastErr) • Groq Backup Connected (llama-3.3-70b)"
+            }
+            if (openRouterKey.isNotBlank()) {
+                val orOk = testOpenRouter(openRouterKey)
+                if (orOk) return@withContext "⚠️ Gemini ($lastErr) • OpenRouter Backup Connected"
+            }
+            return@withContext "❌ $lastErr"
         } else if (groqKey.isNotBlank()) {
             if (testGroq(groqKey)) return@withContext "✅ Groq Backup Connected (llama-3.3-70b-versatile)"
             return@withContext "❌ Groq key test failed."
@@ -286,7 +344,7 @@ class GeminiNativeClient {
 
     suspend fun streamChat(
         apiKey: String,
-        model: String = "gemini-2.5-flash",
+        model: String = DEFAULT_FLASH_MODEL,
         systemInstruction: String,
         history: List<Pair<String, String>>,
         userPrompt: String,
@@ -325,8 +383,10 @@ class GeminiNativeClient {
                 val err = res.exceptionOrNull()
                 lastError = err
                 val msg = err?.message.orEmpty()
-                // Only fallback if quota exhausted (429) or model not found (404) or transient server overload (503)
-                val isRetryable = msg.contains("429") || msg.contains("404") || msg.contains("503") || msg.contains("RESOURCE_EXHAUSTED")
+                // Fallback on quota, model not found, server error or bad argument
+                val isRetryable = msg.contains("429") || msg.contains("404") || msg.contains("503") ||
+                        msg.contains("RESOURCE_EXHAUSTED") || msg.contains("400") ||
+                        msg.contains("not found") || msg.contains("not supported")
                 if (!isRetryable) {
                     break
                 }
@@ -406,6 +466,8 @@ class GeminiNativeClient {
 
         val request = Request.Builder()
             .url(url)
+            .header("x-goog-api-key", apiKey.trim())
+            .header("Content-Type", "application/json")
             .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
@@ -460,7 +522,7 @@ class GeminiNativeClient {
 
     suspend fun streamGrounded(
         apiKey: String,
-        model: String = "gemini-2.5-flash",
+        model: String = DEFAULT_FLASH_MODEL,
         systemInstruction: String,
         userPrompt: String,
         backupGroqKey: String = "",
@@ -521,7 +583,7 @@ class GeminiNativeClient {
         var ungroundedText = ""
         val ungroundedRes = streamChat(
             apiKey = apiKey,
-            model = "gemini-2.5-flash",
+            model = DEFAULT_FLASH_MODEL,
             systemInstruction = systemInstruction,
             history = emptyList(),
             userPrompt = userPrompt,
@@ -579,6 +641,8 @@ class GeminiNativeClient {
 
         val request = Request.Builder()
             .url(url)
+            .header("x-goog-api-key", apiKey.trim())
+            .header("Content-Type", "application/json")
             .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
@@ -666,7 +730,7 @@ class GeminiNativeClient {
 
     suspend fun generateOnce(
         apiKey: String,
-        model: String = "gemini-2.5-flash",
+        model: String = DEFAULT_FLASH_MODEL,
         systemInstruction: String,
         userPrompt: String,
         temperature: Double = 0.7,
@@ -733,6 +797,8 @@ class GeminiNativeClient {
 
         val request = Request.Builder()
             .url(url)
+            .header("x-goog-api-key", apiKey.trim())
+            .header("Content-Type", "application/json")
             .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
@@ -789,7 +855,7 @@ class GeminiNativeClient {
         fileUri: Uri?,
         mimeType: String?,
         fileSizeBytes: Long,
-        model: String = "gemini-2.5-flash",
+        model: String = DEFAULT_FLASH_MODEL,
         systemInstruction: String,
         prompt: String,
         onStatus: (String) -> Unit = {},

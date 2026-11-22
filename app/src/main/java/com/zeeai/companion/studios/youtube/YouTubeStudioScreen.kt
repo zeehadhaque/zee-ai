@@ -389,7 +389,7 @@ fun YouTubeStudioScreen(
                     enabled = topicInput.isNotBlank() && !busy,
                     onClick = {
                         val apiKey = keyVault.getKey("gemini_api_key")
-                        val activeFlash = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
+                        val activeFlash = keyVault.getKey("gemini_flash_model").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
                         val backupGroq = keyVault.getKey("groq_api_key")
                         val backupOpenRouter = keyVault.getKey("openrouter_api_key")
 
@@ -535,7 +535,7 @@ fun YouTubeStudioScreen(
                     enabled = topicInput.isNotBlank() && !busy,
                     onClick = {
                         val apiKey = keyVault.getKey("gemini_api_key")
-                        val activeFlash = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
+                        val activeFlash = keyVault.getKey("gemini_flash_model").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
                         val backupGroq = keyVault.getKey("groq_api_key")
                         val backupOpenRouter = keyVault.getKey("openrouter_api_key")
 

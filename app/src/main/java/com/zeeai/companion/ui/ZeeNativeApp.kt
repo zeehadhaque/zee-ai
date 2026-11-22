@@ -230,7 +230,7 @@ fun ZeeNativeApp(
             val geminiKey = keyVault.getKey("gemini_api_key")
             val backupGroq = keyVault.getKey("groq_api_key")
             val backupOpenRouter = keyVault.getKey("openrouter_api_key")
-            val savedFlash = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
+            val savedFlash = keyVault.getKey("gemini_flash_model").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
 
             if (online && (geminiKey.isNotBlank() || backupGroq.isNotBlank() || backupOpenRouter.isNotBlank())) {
                 val historyPairs = messages.takeLast(10).map {
@@ -1207,12 +1207,14 @@ fun ZeeNativeApp(
                         var isValidating by remember { mutableStateOf(false) }
 
                         val storedModels = keyVault.getKey("gemini_discovered_models").split(",").filter { it.isNotBlank() }
-                        var discoveredModels by remember { mutableStateOf(storedModels) }
+                        var discoveredModels by remember {
+                            mutableStateOf(if (storedModels.isNotEmpty()) storedModels else GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS)
+                        }
                         var selectedFlash by remember {
-                            mutableStateOf(keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" })
+                            mutableStateOf(keyVault.getKey("gemini_flash_model").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL })
                         }
                         var selectedPro by remember {
-                            mutableStateOf(keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" })
+                            mutableStateOf(keyVault.getKey("gemini_pro_model").ifBlank { GeminiNativeClient.DEFAULT_PRO_MODEL })
                         }
                         var flashDropdownOpen by remember { mutableStateOf(false) }
                         var proDropdownOpen by remember { mutableStateOf(false) }
@@ -1220,6 +1222,7 @@ fun ZeeNativeApp(
                         val runLiveValidation: (String) -> Unit = { keyToValidate ->
                             val clean = keyToValidate.trim()
                             if (clean.isNotBlank()) {
+                                keyVault.saveKey("gemini_api_key", clean)
                                 isValidating = true
                                 statusMsg = "Connecting to Google AI Studio..."
                                 scope.launch {
@@ -1228,7 +1231,8 @@ fun ZeeNativeApp(
                                     res.onSuccess { disc ->
                                         isVerified = true
                                         statusMsg = "API Key Verified • ${disc.models.size} models detected"
-                                        discoveredModels = disc.models.map { it.id }
+                                        val combined = (disc.models.map { it.id } + GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS).distinct()
+                                        discoveredModels = combined
                                         selectedFlash = disc.bestFlashModel
                                         selectedPro = disc.bestProModel
 
@@ -1239,10 +1243,23 @@ fun ZeeNativeApp(
                                         keyVault.saveKey("gemini_flash_model", selectedFlash)
                                         keyVault.saveKey("gemini_pro_model", selectedPro)
                                     }.onFailure { err ->
-                                        isVerified = false
-                                        statusMsg = "Validation failed: ${err.message?.take(120)}"
-                                        keyVault.saveKey("gemini_api_status", "invalid")
-                                        keyVault.saveKey("gemini_status_msg", statusMsg)
+                                        // Fallback test
+                                        val diag = geminiClient.testAiConnection(clean)
+                                        if (diag.contains("Connected") || diag.contains("Ready")) {
+                                            isVerified = true
+                                            statusMsg = diag
+                                            discoveredModels = GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS
+                                            keyVault.saveKey("gemini_api_status", "verified")
+                                            keyVault.saveKey("gemini_status_msg", statusMsg)
+                                            keyVault.saveKey("gemini_discovered_models", discoveredModels.joinToString(","))
+                                            keyVault.saveKey("gemini_flash_model", selectedFlash)
+                                            keyVault.saveKey("gemini_pro_model", selectedPro)
+                                        } else {
+                                            isVerified = false
+                                            statusMsg = "Validation failed: ${err.message?.take(120)}"
+                                            keyVault.saveKey("gemini_api_status", "invalid")
+                                            keyVault.saveKey("gemini_status_msg", statusMsg)
+                                        }
                                     }
                                 }
                             }
@@ -1271,8 +1288,12 @@ fun ZeeNativeApp(
                                 value = geminiInput,
                                 onValueChange = { newVal ->
                                     geminiInput = newVal
-                                    if (newVal.trim().startsWith("AIza") && newVal.trim().length >= 39) {
-                                        runLiveValidation(newVal)
+                                    val clean = newVal.trim()
+                                    if (clean.isNotBlank()) {
+                                        keyVault.saveKey("gemini_api_key", clean)
+                                    }
+                                    if (clean.startsWith("AIza") && clean.length >= 39) {
+                                        runLiveValidation(clean)
                                     }
                                 },
                                 visualTransformation = PasswordVisualTransformation(),
@@ -1307,13 +1328,21 @@ fun ZeeNativeApp(
                                 Button(
                                     onClick = {
                                         scope.launch {
-                                            statusMsg = "Testing active AI connection..."
+                                            val clean = geminiInput.trim()
+                                            if (clean.isNotBlank()) {
+                                                keyVault.saveKey("gemini_api_key", clean)
+                                            }
+                                            statusMsg = "Testing active Gemini models..."
                                             val diag = geminiClient.testAiConnection(
-                                                geminiKey = geminiInput,
+                                                geminiKey = clean,
                                                 groqKey = keyVault.getKey("groq_api_key"),
                                                 openRouterKey = keyVault.getKey("openrouter_api_key")
                                             )
                                             statusMsg = diag
+                                            if (diag.contains("Connected") || diag.contains("Ready")) {
+                                                isVerified = true
+                                                keyVault.saveKey("gemini_api_status", "verified")
+                                            }
                                             keyVault.saveKey("gemini_status_msg", statusMsg)
                                         }
                                     },
