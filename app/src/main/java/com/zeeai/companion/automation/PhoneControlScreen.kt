@@ -433,8 +433,26 @@ fun PhoneControlScreen(
             }
 
             Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { executePhoneCommand("open WhatsApp") }) {
+                Button(
+                    onClick = { executePhoneCommand("story post koro") },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE1306C))
+                ) {
+                    Text("📸 Post Story", fontSize = 11.sp)
+                }
+                Button(
+                    onClick = { executePhoneCommand("call dialer") },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+                ) {
+                    Text("📞 Call / Dialer", fontSize = 11.sp)
+                }
+                Button(
+                    onClick = { executePhoneCommand("open WhatsApp") },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
+                ) {
                     Text("💬 WhatsApp", fontSize = 11.sp)
+                }
+                OutlinedButton(onClick = { executePhoneCommand("open Messenger") }) {
+                    Text("⚡ Messenger", fontSize = 11.sp)
                 }
                 OutlinedButton(onClick = { executePhoneCommand("open YouTube") }) {
                     Text("🎥 YouTube", fontSize = 11.sp)
