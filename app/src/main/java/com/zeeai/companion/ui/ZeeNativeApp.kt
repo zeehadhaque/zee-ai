@@ -334,14 +334,15 @@ fun ZeeNativeApp(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
-                                    .background(Color(0xFF070D1D), CircleShape)
-                                    .border(1.2.dp, Color(0xFF00F0FF).copy(alpha = 0.6f), CircleShape)
-                                    .padding(4.dp),
+                                    .size(46.dp)
+                                    .background(Color(0xFF030712), CircleShape)
+                                    .border(1.2.dp, Color(0xFF00F0FF).copy(alpha = 0.7f), CircleShape)
+                                    .border(2.5.dp, Color(0xFF7C3AED).copy(alpha = 0.35f), CircleShape)
+                                    .padding(2.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                                    painter = painterResource(id = R.drawable.zee_brand_logo),
                                     contentDescription = "ZEE AI Logo",
                                     tint = Color.Unspecified,
                                     modifier = Modifier.fillMaxSize()
@@ -452,13 +453,14 @@ fun ZeeNativeApp(
                             Box(
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(Color(0xFF070D1D), CircleShape)
-                                    .border(1.dp, Color(0xFF00F0FF).copy(alpha = 0.5f), CircleShape)
-                                    .padding(3.dp),
+                                    .background(Color(0xFF030712), CircleShape)
+                                    .border(1.dp, Color(0xFF00F0FF).copy(alpha = 0.65f), CircleShape)
+                                    .border(2.dp, Color(0xFF7C3AED).copy(alpha = 0.35f), CircleShape)
+                                    .padding(2.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                                    painter = painterResource(id = R.drawable.zee_brand_logo),
                                     contentDescription = "ZEE AI Emblem",
                                     tint = Color.Unspecified,
                                     modifier = Modifier.fillMaxSize()
