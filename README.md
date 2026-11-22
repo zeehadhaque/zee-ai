@@ -15,12 +15,12 @@
 
 <p align="center">
   <a href="https://github.com/zeehadhaque/zee-ai/releases/latest">
-    <img src="https://img.shields.io/badge/Release-v1.0.3_Stable-2F80FF?style=for-the-badge&logo=github&logoColor=white&labelColor=060913" alt="Release" />
+    <img src="https://img.shields.io/badge/Release-v1.0.0_Official-2F80FF?style=for-the-badge&logo=github&logoColor=white&labelColor=060913" alt="Release" />
   </a>
-  <a href="https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.3/zee-ai-companion.apk">
-    <img src="https://img.shields.io/badge/Package-zee--ai--companion.apk-00F0FF?style=for-the-badge&logo=android&logoColor=white&labelColor=060913" alt="Package" />
+  <a href="https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk">
+    <img src="https://img.shields.io/badge/Package-zee--ai.apk-00F0FF?style=for-the-badge&logo=android&logoColor=white&labelColor=060913" alt="Package" />
   </a>
-  <a href="https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.3/zee-ai-companion.apk">
+  <a href="https://github.com/zeehadhaque/zee-ai/releases/download/v1.0.0/zee-ai.apk">
     <img src="https://img.shields.io/badge/Size-30.42_MB-10B981?style=for-the-badge&logo=googleplay&logoColor=white&labelColor=060913" alt="Size" />
   </a>
   <img src="https://img.shields.io/badge/Platform-Android_8.0_%E2%80%93_17%2B_(API_26--36%2B)-060913?style=for-the-badge&logo=android&logoColor=3DDC84&labelColor=060913" alt="Platform" />
