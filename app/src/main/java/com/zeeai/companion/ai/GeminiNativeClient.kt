@@ -65,7 +65,15 @@ class GeminiNativeClient {
 
     companion object {
         val ALL_KNOWN_GEMINI_MODELS = listOf(
-            // Frontier Gemini 4 & 3.8 Series
+            // Production Stable Workhorses (Guaranteed Active & Free-Tier in Google AI Studio)
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash-8b",
+            "gemini-1.5-pro",
+            "gemini-2.0-flash-thinking-exp-01-21",
+            "gemini-2.0-pro-exp-02-05",
+            // Frontier Next-Gen Models (Auto-fallback to gemini-2.0-flash if not enabled on API key)
             "gemini-3.8-flash",
             "gemini-3.8-pro",
             "gemini-4-hydrogen",
@@ -73,50 +81,26 @@ class GeminiNativeClient {
             "gemini-4-neon",
             "gemini-4-argon",
             "gemini-3.0-flash",
-            "gemini-3.0-pro",
-            // Stable 2.0 & 2.5 Series
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
-            "gemini-2.0-flash-exp",
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            // Reasoning & Thinking Flagships
-            "gemini-2.0-pro-exp-02-05",
-            "gemini-2.0-flash-thinking-exp-01-21",
-            "gemini-exp-1206",
-            // Established 1.5 Workhorses
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-8b",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-pro",
-            "gemini-1.5-pro-latest"
+            "gemini-3.0-pro"
         )
 
         const val DEFAULT_FLASH_MODEL = "gemini-2.0-flash"
         const val DEFAULT_PRO_MODEL = "gemini-1.5-pro"
     }
 
-    // Ordered high-quota Free-Tier Flash models (all official latest Gemini endpoints)
+    // Ordered guaranteed-active Flash models FIRST (Free-Tier & High Quota)
     private val standardFlashPriority = listOf(
-        "gemini-3.8-flash",
         "gemini-2.0-flash",
         "gemini-1.5-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-pro",
+        "gemini-2.0-flash-thinking-exp-01-21",
+        "gemini-2.0-pro-exp-02-05",
+        "gemini-3.8-flash",
         "gemini-4-hydrogen",
         "gemini-4-neon",
-        "gemini-2.0-flash-lite",
-        "gemini-3.0-flash",
-        "gemini-4-carbon",
-        "gemini-4-argon",
-        "gemini-1.5-flash-8b",
-        "gemini-2.0-flash-exp",
-        "gemini-2.5-flash",
-        "gemini-2.0-pro-exp-02-05",
-        "gemini-2.0-flash-thinking-exp-01-21",
-        "gemini-3.8-pro",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-pro-latest",
-        "gemini-exp-1206"
+        "gemini-3.0-flash"
     )
 
     fun cancelActive() {
@@ -167,7 +151,7 @@ class GeminiNativeClient {
                         }
                     }
 
-                    if (methods.contains("generateContent")) {
+                    if (methods.contains("generateContent") && id != "gemini-exp-1206" && id != "gemini-2.5-flash") {
                         discoveredList.add(DiscoveredModel(id, displayName, description, methods))
                     }
                 }
@@ -209,15 +193,12 @@ class GeminiNativeClient {
         val cleanKey = geminiKey.trim()
         if (cleanKey.isNotBlank()) {
             val candidateTestModels = listOf(
-                "gemini-3.8-flash",
                 "gemini-2.0-flash",
                 "gemini-1.5-flash",
-                "gemini-4-hydrogen",
-                "gemini-4-neon",
                 "gemini-2.0-flash-lite",
                 "gemini-1.5-pro",
                 "gemini-1.5-flash-8b",
-                "gemini-2.5-flash"
+                "gemini-2.0-flash-thinking-exp-01-21"
             )
             var lastErr = ""
             for (testModel in candidateTestModels) {
@@ -379,9 +360,17 @@ class GeminiNativeClient {
             return@withContext Result.failure(IllegalStateException("No AI API key configured in Settings."))
         }
 
+        // Sanitize requested model name (remove prefix, handle deprecated models)
+        val cleanRequested = model.removePrefix("models/").trim()
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206" || cleanRequested == "gemini-2.5-flash") {
+            DEFAULT_FLASH_MODEL
+        } else {
+            cleanRequested
+        }
+
         // Build fallback list starting with requested model then standard Flash cascade
         val modelsToTry = mutableListOf<String>()
-        modelsToTry.add(model)
+        modelsToTry.add(primary)
         for (m in standardFlashPriority) {
             if (!modelsToTry.contains(m)) modelsToTry.add(m)
         }
@@ -405,11 +394,9 @@ class GeminiNativeClient {
                 val err = res.exceptionOrNull()
                 lastError = err
                 val msg = err?.message.orEmpty()
-                // Fallback on quota, model not found, server error or bad argument
-                val isRetryable = msg.contains("429") || msg.contains("404") || msg.contains("503") ||
-                        msg.contains("RESOURCE_EXHAUSTED") || msg.contains("400") ||
-                        msg.contains("not found") || msg.contains("not supported")
-                if (!isRetryable) {
+                val isFatalAuth = msg.contains("API_KEY_INVALID") || msg.contains("API key not valid") ||
+                        msg.contains("PERMISSION_DENIED") || msg.contains("HTTP 403") || msg.contains("HTTP 401")
+                if (isFatalAuth) {
                     break
                 }
             }
@@ -455,8 +442,34 @@ class GeminiNativeClient {
         enableGoogleSearch: Boolean,
         onChunk: (accumulatedText: String) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
+        val targetModel = model.removePrefix("models/").trim()
+        if (targetModel.isBlank() || targetModel == "gemini-exp-1206" || targetModel == "gemini-2.5-flash") {
+            return@withContext Result.failure(IllegalStateException("Model $targetModel is not found or unsupported."))
+        }
+
+        // Clean & sanitize history turns to strictly satisfy Gemini alternating turn requirement
+        val cleanHistory = mutableListOf<Pair<String, String>>()
+        for ((role, text) in history) {
+            val cleanText = text.trim()
+            if (cleanText.isBlank() || cleanText.startsWith("Online AI error") || cleanText.startsWith("Error:")) {
+                continue
+            }
+            val normRole = if (role == "user") "user" else "model"
+            if (cleanHistory.isNotEmpty() && cleanHistory.last().first == normRole) {
+                val lastPair = cleanHistory.removeAt(cleanHistory.size - 1)
+                cleanHistory.add(normRole to "${lastPair.second}\n$cleanText")
+            } else {
+                cleanHistory.add(normRole to cleanText)
+            }
+        }
+
+        // Ensure first turn in history is "user"
+        while (cleanHistory.isNotEmpty() && cleanHistory.first().first != "user") {
+            cleanHistory.removeAt(0)
+        }
+
         val contents = JSONArray()
-        for ((role, text) in history.takeLast(12)) {
+        for ((role, text) in cleanHistory.takeLast(10)) {
             contents.put(
                 JSONObject().apply {
                     put("role", role)
@@ -464,27 +477,37 @@ class GeminiNativeClient {
                 }
             )
         }
-        contents.put(
-            JSONObject().apply {
-                put("role", "user")
-                put("parts", JSONArray().put(JSONObject().put("text", userPrompt)))
-            }
-        )
+
+        if (cleanHistory.isNotEmpty() && cleanHistory.last().first == "user") {
+            val lastObj = contents.getJSONObject(contents.length() - 1)
+            val partsArr = lastObj.getJSONArray("parts")
+            val existingText = partsArr.getJSONObject(0).getString("text")
+            partsArr.put(0, JSONObject().put("text", "$existingText\n${userPrompt.trim()}"))
+        } else {
+            contents.put(
+                JSONObject().apply {
+                    put("role", "user")
+                    put("parts", JSONArray().put(JSONObject().put("text", userPrompt.trim())))
+                }
+            )
+        }
 
         val bodyJson = JSONObject().apply {
-            put(
-                "systemInstruction",
-                JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstruction)))
-            )
+            if (systemInstruction.isNotBlank()) {
+                put(
+                    "systemInstruction",
+                    JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstruction.trim())))
+                )
+            }
             put("contents", contents)
             put("generationConfig", JSONObject().put("temperature", 0.85))
             if (enableGoogleSearch) {
-                put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+                put("tools", JSONArray().put(JSONObject().put("googleSearch", JSONObject())))
             }
         }
 
         val url =
-            "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse&key=${apiKey.trim()}"
+            "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:streamGenerateContent?alt=sse&key=${apiKey.trim()}"
 
         val request = Request.Builder()
             .url(url)
@@ -499,7 +522,8 @@ class GeminiNativeClient {
         try {
             call.execute().use { response ->
                 if (!response.isSuccessful) {
-                    val err = response.body?.string()?.take(250) ?: "HTTP ${response.code}"
+                    val rawErr = response.body?.string().orEmpty().take(250)
+                    val err = if (rawErr.isNotBlank()) rawErr else "HTTP ${response.code}"
                     return@withContext Result.failure(IllegalStateException("HTTP ${response.code}: $err"))
                 }
 
@@ -577,8 +601,15 @@ class GeminiNativeClient {
             return@withContext Result.failure(IllegalStateException("Gemini API key not set in Settings."))
         }
 
+        val cleanRequested = model.removePrefix("models/").trim()
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206" || cleanRequested == "gemini-2.5-flash") {
+            DEFAULT_FLASH_MODEL
+        } else {
+            cleanRequested
+        }
+
         val modelsToTry = mutableListOf<String>()
-        modelsToTry.add(model)
+        modelsToTry.add(primary)
         for (m in standardFlashPriority) {
             if (!modelsToTry.contains(m)) modelsToTry.add(m)
         }
@@ -596,7 +627,9 @@ class GeminiNativeClient {
             }
             val err = groundedRes.exceptionOrNull()
             val msg = err?.message.orEmpty()
-            if (!msg.contains("429") && !msg.contains("404") && !msg.contains("RESOURCE_EXHAUSTED")) {
+            val isFatalAuth = msg.contains("API_KEY_INVALID") || msg.contains("API key not valid") ||
+                    msg.contains("PERMISSION_DENIED") || msg.contains("HTTP 403") || msg.contains("HTTP 401")
+            if (isFatalAuth) {
                 break
             }
         }
@@ -655,11 +688,12 @@ class GeminiNativeClient {
                 )
             )
             put("generationConfig", JSONObject().put("temperature", 0.7))
-            put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+            put("tools", JSONArray().put(JSONObject().put("googleSearch", JSONObject())))
         }
 
+        val targetModel = model.removePrefix("models/").trim()
         val url =
-            "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse&key=${apiKey.trim()}"
+            "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:streamGenerateContent?alt=sse&key=${apiKey.trim()}"
 
         val request = Request.Builder()
             .url(url)
@@ -758,8 +792,14 @@ class GeminiNativeClient {
         temperature: Double = 0.7,
         backupGroqKey: String = ""
     ): Result<String> = withContext(Dispatchers.IO) {
+        val cleanRequested = model.removePrefix("models/").trim()
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206" || cleanRequested == "gemini-2.5-flash") {
+            DEFAULT_FLASH_MODEL
+        } else {
+            cleanRequested
+        }
         val modelsToTry = mutableListOf<String>()
-        modelsToTry.add(model)
+        modelsToTry.add(primary)
         for (m in standardFlashPriority) {
             if (!modelsToTry.contains(m)) modelsToTry.add(m)
         }
@@ -769,7 +809,9 @@ class GeminiNativeClient {
                 val res = generateOnceSingleAttempt(apiKey, candidate, systemInstruction, userPrompt, temperature)
                 if (res.isSuccess) return@withContext res
                 val msg = res.exceptionOrNull()?.message.orEmpty()
-                if (!msg.contains("429") && !msg.contains("404") && !msg.contains("RESOURCE_EXHAUSTED")) {
+                val isFatalAuth = msg.contains("API_KEY_INVALID") || msg.contains("API key not valid") ||
+                        msg.contains("PERMISSION_DENIED") || msg.contains("HTTP 403") || msg.contains("HTTP 401")
+                if (isFatalAuth) {
                     break
                 }
             }
@@ -798,6 +840,7 @@ class GeminiNativeClient {
         userPrompt: String,
         temperature: Double
     ): Result<String> = withContext(Dispatchers.IO) {
+        val targetModel = model.removePrefix("models/").trim()
         val bodyJson = JSONObject().apply {
             put(
                 "systemInstruction",
@@ -815,7 +858,7 @@ class GeminiNativeClient {
         }
 
         val url =
-            "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=${apiKey.trim()}"
+            "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=${apiKey.trim()}"
 
         val request = Request.Builder()
             .url(url)
@@ -944,15 +987,22 @@ class GeminiNativeClient {
             put("generationConfig", JSONObject().put("temperature", 0.4))
         }
 
+        val cleanRequested = model.removePrefix("models/").trim()
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206" || cleanRequested == "gemini-2.5-flash") {
+            DEFAULT_FLASH_MODEL
+        } else {
+            cleanRequested
+        }
         val modelsToTry = mutableListOf<String>()
-        modelsToTry.add(model)
+        modelsToTry.add(primary)
         for (m in standardFlashPriority) {
             if (!modelsToTry.contains(m)) modelsToTry.add(m)
         }
 
         for (candidateModel in modelsToTry) {
+            val targetModel = candidateModel.removePrefix("models/").trim()
             val url =
-                "https://generativelanguage.googleapis.com/v1beta/models/$candidateModel:streamGenerateContent?alt=sse&key=${apiKey.trim()}"
+                "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:streamGenerateContent?alt=sse&key=${apiKey.trim()}"
 
             val request = Request.Builder()
                 .url(url)
@@ -1003,7 +1053,9 @@ class GeminiNativeClient {
                 }
                 if (res.isSuccess) return@withContext res
                 val msg = res.exceptionOrNull()?.message.orEmpty()
-                if (!msg.contains("429") && !msg.contains("404") && !msg.contains("RESOURCE_EXHAUSTED")) {
+                val isFatalAuth = msg.contains("API_KEY_INVALID") || msg.contains("API key not valid") ||
+                        msg.contains("PERMISSION_DENIED") || msg.contains("HTTP 403") || msg.contains("HTTP 401")
+                if (isFatalAuth) {
                     return@withContext res
                 }
             } catch (e: Exception) {

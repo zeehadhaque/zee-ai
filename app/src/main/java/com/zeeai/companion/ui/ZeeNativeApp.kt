@@ -102,6 +102,17 @@ fun ZeeNativeApp(
     var textInput by remember { mutableStateOf("") }
     var pendingConfirm by remember { mutableStateOf<PendingConfirmation?>(null) }
 
+    LaunchedEffect(Unit) {
+        val curFlash = keyVault.getKey("gemini_flash_model").removePrefix("models/").trim()
+        if (curFlash.isBlank() || curFlash == "gemini-exp-1206" || curFlash == "gemini-2.5-flash") {
+            keyVault.saveKey("gemini_flash_model", GeminiNativeClient.DEFAULT_FLASH_MODEL)
+        }
+        val curPro = keyVault.getKey("gemini_pro_model").removePrefix("models/").trim()
+        if (curPro.isBlank() || curPro == "gemini-exp-1206" || curPro == "gemini-2.5-flash") {
+            keyVault.saveKey("gemini_pro_model", GeminiNativeClient.DEFAULT_PRO_MODEL)
+        }
+    }
+
     val messages by dao.observeMessages().collectAsState(initial = emptyList())
     val memories by dao.observeAllMemories().collectAsState(initial = emptyList())
     val models by modelStore.modelsState.collectAsState()
@@ -230,12 +241,19 @@ fun ZeeNativeApp(
             val geminiKey = keyVault.getKey("gemini_api_key")
             val backupGroq = keyVault.getKey("groq_api_key")
             val backupOpenRouter = keyVault.getKey("openrouter_api_key")
-            val savedFlash = keyVault.getKey("gemini_flash_model").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
+            val rawFlash = keyVault.getKey("gemini_flash_model").removePrefix("models/").trim()
+            val savedFlash = if (rawFlash.isBlank() || rawFlash == "gemini-exp-1206" || rawFlash == "gemini-2.5-flash") {
+                GeminiNativeClient.DEFAULT_FLASH_MODEL.also {
+                    keyVault.saveKey("gemini_flash_model", it)
+                }
+            } else {
+                rawFlash
+            }
 
             if (online && (geminiKey.isNotBlank() || backupGroq.isNotBlank() || backupOpenRouter.isNotBlank())) {
-                val historyPairs = messages.takeLast(10).map {
-                    (if (it.role == "user") "user" else "model") to it.text
-                }
+                val historyPairs = messages.takeLast(10)
+                    .filter { !it.text.startsWith("Online AI error") && !it.text.startsWith("Error:") && it.text.isNotBlank() }
+                    .map { (if (it.role == "user") "user" else "model") to it.text }
                 val res = geminiClient.streamChat(
                     apiKey = geminiKey,
                     model = savedFlash,
@@ -1233,15 +1251,30 @@ fun ZeeNativeApp(
                         var isVerified by remember { mutableStateOf(keyVault.getKey("gemini_api_status") == "verified") }
                         var isValidating by remember { mutableStateOf(false) }
 
-                        val storedModels = keyVault.getKey("gemini_discovered_models").split(",").filter { it.isNotBlank() }
+                        val storedModels = keyVault.getKey("gemini_discovered_models")
+                            .split(",")
+                            .map { it.removePrefix("models/").trim() }
+                            .filter { it.isNotBlank() && it != "gemini-exp-1206" && it != "gemini-2.5-flash" }
                         var discoveredModels by remember {
                             mutableStateOf(if (storedModels.isNotEmpty()) storedModels else GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS)
                         }
                         var selectedFlash by remember {
-                            mutableStateOf(keyVault.getKey("gemini_flash_model").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL })
+                            val initial = keyVault.getKey("gemini_flash_model").removePrefix("models/").trim()
+                            val clean = if (initial.isBlank() || initial == "gemini-exp-1206" || initial == "gemini-2.5-flash") {
+                                GeminiNativeClient.DEFAULT_FLASH_MODEL
+                            } else {
+                                initial
+                            }
+                            mutableStateOf(clean)
                         }
                         var selectedPro by remember {
-                            mutableStateOf(keyVault.getKey("gemini_pro_model").ifBlank { GeminiNativeClient.DEFAULT_PRO_MODEL })
+                            val initial = keyVault.getKey("gemini_pro_model").removePrefix("models/").trim()
+                            val clean = if (initial.isBlank() || initial == "gemini-exp-1206" || initial == "gemini-2.5-flash") {
+                                GeminiNativeClient.DEFAULT_PRO_MODEL
+                            } else {
+                                initial
+                            }
+                            mutableStateOf(clean)
                         }
                         var flashDropdownOpen by remember { mutableStateOf(false) }
                         var proDropdownOpen by remember { mutableStateOf(false) }
@@ -1258,10 +1291,12 @@ fun ZeeNativeApp(
                                     res.onSuccess { disc ->
                                         isVerified = true
                                         statusMsg = "API Key Verified • ${disc.models.size} models detected"
-                                        val combined = (disc.models.map { it.id } + GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS).distinct()
+                                        val validModels = disc.models.map { it.id.removePrefix("models/").trim() }
+                                            .filter { it != "gemini-exp-1206" && it != "gemini-2.5-flash" }
+                                        val combined = (validModels + GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS).distinct()
                                         discoveredModels = combined
-                                        selectedFlash = disc.bestFlashModel
-                                        selectedPro = disc.bestProModel
+                                        selectedFlash = disc.bestFlashModel.removePrefix("models/").trim()
+                                        selectedPro = disc.bestProModel.removePrefix("models/").trim()
 
                                         keyVault.saveKey("gemini_api_key", clean)
                                         keyVault.saveKey("gemini_api_status", "verified")
@@ -1431,7 +1466,7 @@ fun ZeeNativeApp(
                                         expanded = flashDropdownOpen,
                                         onDismissRequest = { flashDropdownOpen = false }
                                     ) {
-                                        discoveredModels.filter { it.contains("flash", ignoreCase = true) || !it.contains("pro", ignoreCase = true) }.forEach { modelId ->
+                                        discoveredModels.filter { it != "gemini-exp-1206" && it != "gemini-2.5-flash" && (it.contains("flash", ignoreCase = true) || !it.contains("pro", ignoreCase = true)) }.forEach { modelId ->
                                             DropdownMenuItem(
                                                 text = { Text(modelId) },
                                                 onClick = {
@@ -1458,7 +1493,7 @@ fun ZeeNativeApp(
                                         expanded = proDropdownOpen,
                                         onDismissRequest = { proDropdownOpen = false }
                                     ) {
-                                        discoveredModels.filter { it.contains("pro", ignoreCase = true) || !it.contains("flash", ignoreCase = true) }.forEach { modelId ->
+                                        discoveredModels.filter { it != "gemini-exp-1206" && it != "gemini-2.5-flash" && (it.contains("pro", ignoreCase = true) || !it.contains("flash", ignoreCase = true)) }.forEach { modelId ->
                                             DropdownMenuItem(
                                                 text = { Text(modelId) },
                                                 onClick = {
