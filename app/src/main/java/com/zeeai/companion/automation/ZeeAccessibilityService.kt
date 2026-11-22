@@ -11,15 +11,42 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class ZeeAccessibilityService : AccessibilityService() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    companion object {
+        @Volatile
+        @JvmField
+        var instance: ZeeAccessibilityService? = null
+
+        private val _isConnected = MutableStateFlow(false)
+        val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+
+        fun getInstance(): ZeeAccessibilityService? = instance
+
+        fun isConnected(): Boolean = _isConnected.value || instance != null
+
+        /**
+         * Xiaomi / HyperOS-এ স্ট্রিং ম্যাচিংয়ের বদলে প্যাকেজ নাম দিয়ে নির্ভরযোগ্য স্ট্যাটাস চেক
+         */
+        fun isServiceEnabled(context: Context): Boolean {
+            if (_isConnected.value && instance != null) return true
+            return runCatching {
+                val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+                val enabled = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                enabled.any { it.resolveInfo?.serviceInfo?.packageName == context.packageName }
+            }.getOrDefault(false)
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
-        activeInstance = this
-        isConnected.value = true
+        instance = this
+        _isConnected.value = true
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -29,14 +56,14 @@ class ZeeAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onUnbind(intent: Intent?): Boolean {
-        activeInstance = null
-        isConnected.value = false
+        instance = null
+        _isConnected.value = false
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
-        activeInstance = null
-        isConnected.value = false
+        instance = null
+        _isConnected.value = false
         super.onDestroy()
     }
 
@@ -88,6 +115,40 @@ class ZeeAccessibilityService : AccessibilityService() {
             if (searchAndClick(node.getChild(i), targets)) return true
         }
         return false
+    }
+
+    fun scrollCurrentScreen(down: Boolean): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val action = if (down) {
+            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+        } else {
+            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        }
+        fun findAndScroll(node: AccessibilityNodeInfo?): Boolean {
+            if (node == null) return false
+            if (node.isScrollable && node.performAction(action)) return true
+            for (i in 0 until node.childCount) {
+                if (findAndScroll(node.getChild(i))) return true
+            }
+            return false
+        }
+        return findAndScroll(root)
+    }
+
+    fun scrollActiveContainer(forward: Boolean = true): Boolean {
+        return scrollCurrentScreen(down = forward)
+    }
+
+    fun typeTextIntoFocusedField(text: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?: findFirstEditable(root)
+            ?: return false
+
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        return focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
     fun findFirstEditable(node: AccessibilityNodeInfo? = rootInActiveWindow): AccessibilityNodeInfo? {
@@ -162,17 +223,6 @@ class ZeeAccessibilityService : AccessibilityService() {
         )
     }
 
-    fun scrollActiveContainer(forward: Boolean = true): Boolean {
-        val root = rootInActiveWindow ?: return false
-        val scrollable = findFirstScrollable(root) ?: return false
-        val action = if (forward) {
-            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-        } else {
-            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-        }
-        return scrollable.performAction(action)
-    }
-
     fun navigate(actionName: String): Boolean {
         return when (actionName.lowercase().trim()) {
             "back" -> performGlobalAction(GLOBAL_ACTION_BACK)
@@ -210,36 +260,6 @@ class ZeeAccessibilityService : AccessibilityService() {
 
         for (i in 0 until node.childCount) {
             collectVisibleText(node.getChild(i), output, maxChars)
-        }
-    }
-
-    private fun findFirstScrollable(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (node == null) return null
-        if (node.isScrollable && node.isVisibleToUser) return node
-        for (i in 0 until node.childCount) {
-            val found = findFirstScrollable(node.getChild(i))
-            if (found != null) return found
-        }
-        return null
-    }
-
-    companion object {
-        @Volatile
-        private var activeInstance: ZeeAccessibilityService? = null
-
-        val isConnected = MutableStateFlow(false)
-
-        fun getInstance(): ZeeAccessibilityService? = activeInstance
-
-        fun isConnected(): Boolean = isConnected.value || activeInstance != null
-
-        fun isServiceEnabled(context: Context): Boolean {
-            if (isConnected.value || activeInstance != null) return true
-            return runCatching {
-                val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
-                val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-                enabledServices.any { it.resolveInfo?.serviceInfo?.packageName == context.packageName }
-            }.getOrDefault(false)
         }
     }
 }

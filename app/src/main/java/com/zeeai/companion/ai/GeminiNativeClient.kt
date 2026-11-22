@@ -84,8 +84,8 @@ class GeminiNativeClient {
             "gemini-3.0-pro"
         )
 
-        const val DEFAULT_FLASH_MODEL = "gemini-2.0-flash"
-        const val DEFAULT_PRO_MODEL = "gemini-1.5-pro"
+        const val DEFAULT_FLASH_MODEL = "gemini-2.5-flash"
+        const val DEFAULT_PRO_MODEL = "gemini-2.5-flash"
     }
 
     // Ordered guaranteed-active Flash models FIRST (Free-Tier & High Quota)
@@ -151,7 +151,7 @@ class GeminiNativeClient {
                         }
                     }
 
-                    if (methods.contains("generateContent") && id != "gemini-exp-1206" && id != "gemini-2.5-flash") {
+                    if (methods.contains("generateContent") && id != "gemini-2.5-flash" && id != "gemini-2.5-flash") {
                         discoveredList.add(DiscoveredModel(id, displayName, description, methods))
                     }
                 }
@@ -187,19 +187,20 @@ class GeminiNativeClient {
 
     suspend fun testAiConnection(
         geminiKey: String,
+        selectedModel: String = "",
         groqKey: String = "",
         openRouterKey: String = ""
     ): String = withContext(Dispatchers.IO) {
         val cleanKey = geminiKey.trim()
         if (cleanKey.isNotBlank()) {
-            val candidateTestModels = listOf(
-                "gemini-2.0-flash",
-                "gemini-1.5-flash",
-                "gemini-2.0-flash-lite",
-                "gemini-1.5-pro",
-                "gemini-1.5-flash-8b",
-                "gemini-2.0-flash-thinking-exp-01-21"
-            )
+            val cleanSelected = selectedModel.removePrefix("models/").trim()
+            val candidateTestModels = mutableListOf<String>()
+            if (cleanSelected.isNotBlank() && !cleanSelected.contains("-exp") && cleanSelected != "gemini-exp-1206") {
+                candidateTestModels.add(cleanSelected)
+            }
+            listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash").forEach {
+                if (!candidateTestModels.contains(it)) candidateTestModels.add(it)
+            }
             var lastErr = ""
             for (testModel in candidateTestModels) {
                 val testUrl = "https://generativelanguage.googleapis.com/v1beta/models/$testModel:generateContent?key=$cleanKey"
@@ -216,7 +217,8 @@ class GeminiNativeClient {
                         .build()
                     client.newCall(req).execute().use { resp ->
                         if (resp.isSuccessful) {
-                            return@withContext "✅ Gemini Connected: $testModel (Online & Ready)"
+                            val autoNotice = if (cleanSelected.isNotBlank() && cleanSelected != testModel) " (Switched to Active: $testModel)" else ""
+                            return@withContext "✅ Gemini Connected$autoNotice: $testModel (Online & Ready)"
                         } else if (resp.code == 429) {
                             lastErr = "⚠️ Gemini Quota Exhausted (429) on $testModel"
                         } else {
@@ -362,7 +364,7 @@ class GeminiNativeClient {
 
         // Sanitize requested model name (remove prefix, handle deprecated models)
         val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206" || cleanRequested == "gemini-2.5-flash") {
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-2.5-flash" || cleanRequested == "gemini-2.5-flash") {
             DEFAULT_FLASH_MODEL
         } else {
             cleanRequested
@@ -443,7 +445,7 @@ class GeminiNativeClient {
         onChunk: (accumulatedText: String) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
         val targetModel = model.removePrefix("models/").trim()
-        if (targetModel.isBlank() || targetModel == "gemini-exp-1206" || targetModel == "gemini-2.5-flash") {
+        if (targetModel.isBlank() || targetModel == "gemini-2.5-flash" || targetModel == "gemini-2.5-flash") {
             return@withContext Result.failure(IllegalStateException("Model $targetModel is not found or unsupported."))
         }
 
@@ -602,7 +604,7 @@ class GeminiNativeClient {
         }
 
         val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206" || cleanRequested == "gemini-2.5-flash") {
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-2.5-flash" || cleanRequested == "gemini-2.5-flash") {
             DEFAULT_FLASH_MODEL
         } else {
             cleanRequested
@@ -793,7 +795,7 @@ class GeminiNativeClient {
         backupGroqKey: String = ""
     ): Result<String> = withContext(Dispatchers.IO) {
         val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206" || cleanRequested == "gemini-2.5-flash") {
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-2.5-flash" || cleanRequested == "gemini-2.5-flash") {
             DEFAULT_FLASH_MODEL
         } else {
             cleanRequested
@@ -988,7 +990,7 @@ class GeminiNativeClient {
         }
 
         val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206" || cleanRequested == "gemini-2.5-flash") {
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-2.5-flash" || cleanRequested == "gemini-2.5-flash") {
             DEFAULT_FLASH_MODEL
         } else {
             cleanRequested

@@ -13,7 +13,7 @@ android {
         applicationId = "com.zeeai.companion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
+        versionCode = 3
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -90,7 +90,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     // On-Device Offline LLM Inference (Downloaded dynamically — zero APK bloat)
-    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    implementation("com.google.mediapipe:tasks-genai:0.10.27")
 
     // Unit Tests
     testImplementation("junit:junit:4.13.2")

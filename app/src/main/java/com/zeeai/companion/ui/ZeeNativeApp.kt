@@ -16,8 +16,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,6 +40,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.zeeai.companion.offline.OfflineConversationalBrain
 import com.zeeai.companion.ai.GeminiNativeClient
 import com.zeeai.companion.automation.NativePhoneCommander
+import com.zeeai.companion.offline.BestFriendPersona
+import com.zeeai.companion.offline.OfflineChatTurn
+import com.zeeai.companion.offline.OfflineBrainCoordinator
+import com.zeeai.companion.offline.PersonalOfflineMemoryVault
+import com.zeeai.companion.offline.PersonalMemoryItem
+import com.zeeai.companion.automation.OfflineAutonomousPhoneController
 import com.zeeai.companion.automation.PendingConfirmation
 import com.zeeai.companion.automation.PhoneCommandOutcome
 import com.zeeai.companion.automation.PhoneControlScreen
@@ -80,6 +89,9 @@ fun ZeeNativeApp(
     val dao = remember { database.dao() }
     val geminiClient = remember { GeminiNativeClient() }
     val phoneCommander = remember { NativePhoneCommander(context) }
+    val offlineMemoryVault = remember { PersonalOfflineMemoryVault(context) }
+    val offlinePhoneController = remember { OfflineAutonomousPhoneController(context, offlineMemoryVault) }
+    val offlineCoordinator = remember { OfflineBrainCoordinator(localLlm, offlineMemoryVault, offlinePhoneController) }
 
     var modelImportNote by remember { mutableStateOf("") }
     val modelFilePicker = rememberLauncherForActivityResult(
@@ -102,13 +114,15 @@ fun ZeeNativeApp(
     var textInput by remember { mutableStateOf("") }
     var pendingConfirm by remember { mutableStateOf<PendingConfirmation?>(null) }
 
+    var forceOfflineMode by remember { mutableStateOf(keyVault.getKey("force_offline_engine") == "true") }
+
     LaunchedEffect(Unit) {
         val curFlash = keyVault.getKey("gemini_flash_model").removePrefix("models/").trim()
-        if (curFlash.isBlank() || curFlash == "gemini-exp-1206" || curFlash == "gemini-2.5-flash") {
+        if (curFlash.isBlank() || curFlash == "gemini-exp-1206" || curFlash.contains("-exp") || curFlash.contains("gemini-4-")) {
             keyVault.saveKey("gemini_flash_model", GeminiNativeClient.DEFAULT_FLASH_MODEL)
         }
         val curPro = keyVault.getKey("gemini_pro_model").removePrefix("models/").trim()
-        if (curPro.isBlank() || curPro == "gemini-exp-1206" || curPro == "gemini-2.5-flash") {
+        if (curPro.isBlank() || curPro == "gemini-exp-1206" || curPro.contains("-exp") || curPro.contains("gemini-4-")) {
             keyVault.saveKey("gemini_pro_model", GeminiNativeClient.DEFAULT_PRO_MODEL)
         }
     }
@@ -237,12 +251,12 @@ fun ZeeNativeApp(
             isGenerating = true
             streamingReply = ""
 
-            val online = isNetworkAvailable()
+            val online = !forceOfflineMode && isNetworkAvailable()
             val geminiKey = keyVault.getKey("gemini_api_key")
             val backupGroq = keyVault.getKey("groq_api_key")
             val backupOpenRouter = keyVault.getKey("openrouter_api_key")
             val rawFlash = keyVault.getKey("gemini_flash_model").removePrefix("models/").trim()
-            val savedFlash = if (rawFlash.isBlank() || rawFlash == "gemini-exp-1206" || rawFlash == "gemini-2.5-flash") {
+            val savedFlash = if (rawFlash.isBlank() || rawFlash == "gemini-exp-1206" || rawFlash.contains("-exp") || rawFlash.contains("gemini-4-")) {
                 GeminiNativeClient.DEFAULT_FLASH_MODEL.also {
                     keyVault.saveKey("gemini_flash_model", it)
                 }
@@ -278,67 +292,37 @@ fun ZeeNativeApp(
                 isGenerating = false
                 if (autoSpeak) voiceController.speak(finalReply, voiceProfile)
             } else {
-                // Offline Path: Real On-Device MediaPipe LLM -> Fallback Local Creative Engine
-                val installedModelId = localLlm.findFirstInstalledMediaPipeModelId()
-                if (installedModelId != null) {
-                    val acc = StringBuilder()
-                    localLlm.streamResponse(
-                        modelId = installedModelId,
-                        systemInstruction = sysPrompt,
-                        userPrompt = prompt,
-                        onToken = { token, done ->
-                            acc.append(token)
+                // Offline Path: Autonomous Best Friend Coordinator (Direct Phone Control + Gemma Offline LLM)
+                val installedModelFile = localLlm.findFirstInstalledModelFile()
+                val persona = if (activeCharId == "zhee") BestFriendPersona.ZHEE else BestFriendPersona.ZEE
+                val recentHistory = messages.takeLast(6).map { OfflineChatTurn(isUser = it.role == "user", text = it.text) }
+
+                scope.launch(Dispatchers.IO) {
+                    val finalReply = offlineCoordinator.processOfflineTurn(
+                        userMessage = prompt,
+                        persona = persona,
+                        recentHistory = recentHistory,
+                        installedModelPath = installedModelFile?.absolutePath,
+                        onStreamingUpdate = { partial ->
                             scope.launch(Dispatchers.Main) {
-                                streamingReply = acc.toString()
-                                if (done) {
-                                    val finalText = acc.toString().trim()
-                                    dao.insertMessage(
-                                        ChatMessageEntity(
-                                            id = UUID.randomUUID().toString(),
-                                            characterId = activeCharId,
-                                            role = "assistant",
-                                            text = finalText,
-                                            source = "local-llm"
-                                        )
-                                    )
-                                    streamingReply = ""
-                                    isGenerating = false
-                                    if (autoSpeak) voiceController.speak(finalText, voiceProfile)
-                                }
-                            }
-                        },
-                        onError = { err ->
-                            scope.launch(Dispatchers.Main) {
-                                val fallbackReply = OfflineConversationalBrain.respond(prompt, activeCharId)
-                                dao.insertMessage(
-                                    ChatMessageEntity(
-                                        id = UUID.randomUUID().toString(),
-                                        characterId = activeCharId,
-                                        role = "assistant",
-                                        text = fallbackReply,
-                                        source = "offline-companion"
-                                    )
-                                )
-                                streamingReply = ""
-                                isGenerating = false
-                                if (autoSpeak) voiceController.speak(fallbackReply, voiceProfile)
+                                streamingReply = partial
                             }
                         }
                     )
-                } else {
-                    val offlineReply = OfflineConversationalBrain.respond(prompt, activeCharId)
-                    dao.insertMessage(
-                        ChatMessageEntity(
-                            id = UUID.randomUUID().toString(),
-                            characterId = activeCharId,
-                            role = "assistant",
-                            text = offlineReply,
-                            source = "offline-companion"
+                    scope.launch(Dispatchers.Main) {
+                        dao.insertMessage(
+                            ChatMessageEntity(
+                                id = UUID.randomUUID().toString(),
+                                characterId = activeCharId,
+                                role = "assistant",
+                                text = finalReply,
+                                source = "offline-companion"
+                            )
                         )
-                    )
-                    streamingReply = ""
-                    isGenerating = false
-                    if (autoSpeak) voiceController.speak(offlineReply, voiceProfile)
+                        streamingReply = ""
+                        isGenerating = false
+                        if (autoSpeak) voiceController.speak(finalReply, voiceProfile)
+                    }
                 }
             }
         }
@@ -496,7 +480,7 @@ fun ZeeNativeApp(
                         .padding(innerPadding)
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
-                    // Drawer Toggle + Emergency Stop + Online/Offline Header
+                    // Drawer Toggle + Emergency Stop + Online/Offline Header & Engine Toggle
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -535,27 +519,54 @@ fun ZeeNativeApp(
                             Column {
                                 Text("ZEE AI", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text(
-                                    if (isNetworkAvailable()) "Online • Gemini Ready" else "Offline • Local Mode",
-                                    color = if (isNetworkAvailable()) Color(0xFF34D399) else Color(0xFFFBBF24),
+                                    if (forceOfflineMode) "Offline • Forced Local"
+                                    else if (isNetworkAvailable()) "Online • Gemini Ready"
+                                    else "Offline • Local Mode",
+                                    color = if (forceOfflineMode) Color(0xFFA78BFA) else if (isNetworkAvailable()) Color(0xFF34D399) else Color(0xFFFBBF24),
                                     fontSize = 10.sp
                                 )
                             }
                         }
-                        Button(
-                            onClick = {
-                                geminiClient.cancelActive()
-                                localLlm.cancelActiveGeneration()
-                                voiceController.emergencyStop()
-                                WakeWordForegroundService.stop(context)
-                                isSpeaking = false
-                                isGenerating = false
-                                streamingReply = ""
-                                livePartialVoice = ""
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("STOP ALL", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Surface(
+                                onClick = {
+                                    forceOfflineMode = !forceOfflineMode
+                                    keyVault.saveKey("force_offline_engine", forceOfflineMode.toString())
+                                },
+                                shape = RoundedCornerShape(50),
+                                color = if (forceOfflineMode) Color(0xFF1F2937) else Color(0xFF0E2A38),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = if (forceOfflineMode) Color(0xFFF59E0B) else Color(0xFF00F0FF)
+                                )
+                            ) {
+                                Text(
+                                    text = if (forceOfflineMode) "📴 Offline" else "🌐 Auto",
+                                    color = if (forceOfflineMode) Color(0xFFFBBF24) else Color(0xFF67E8F9),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    geminiClient.cancelActive()
+                                    localLlm.cancelActiveGeneration()
+                                    voiceController.emergencyStop()
+                                    WakeWordForegroundService.stop(context)
+                                    isSpeaking = false
+                                    isGenerating = false
+                                    streamingReply = ""
+                                    livePartialVoice = ""
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text("STOP", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
 
@@ -1254,13 +1265,13 @@ fun ZeeNativeApp(
                         val storedModels = keyVault.getKey("gemini_discovered_models")
                             .split(",")
                             .map { it.removePrefix("models/").trim() }
-                            .filter { it.isNotBlank() && it != "gemini-exp-1206" && it != "gemini-2.5-flash" }
+                            .filter { it.isNotBlank() && it != "gemini-exp-1206" && !it.contains("-exp") && !it.contains("gemini-4-") }
                         var discoveredModels by remember {
                             mutableStateOf(if (storedModels.isNotEmpty()) storedModels else GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS)
                         }
                         var selectedFlash by remember {
                             val initial = keyVault.getKey("gemini_flash_model").removePrefix("models/").trim()
-                            val clean = if (initial.isBlank() || initial == "gemini-exp-1206" || initial == "gemini-2.5-flash") {
+                            val clean = if (initial.isBlank() || initial == "gemini-exp-1206" || initial.contains("-exp") || initial.contains("gemini-4-")) {
                                 GeminiNativeClient.DEFAULT_FLASH_MODEL
                             } else {
                                 initial
@@ -1269,7 +1280,7 @@ fun ZeeNativeApp(
                         }
                         var selectedPro by remember {
                             val initial = keyVault.getKey("gemini_pro_model").removePrefix("models/").trim()
-                            val clean = if (initial.isBlank() || initial == "gemini-exp-1206" || initial == "gemini-2.5-flash") {
+                            val clean = if (initial.isBlank() || initial == "gemini-exp-1206" || initial.contains("-exp") || initial.contains("gemini-4-")) {
                                 GeminiNativeClient.DEFAULT_PRO_MODEL
                             } else {
                                 initial
@@ -1292,7 +1303,7 @@ fun ZeeNativeApp(
                                         isVerified = true
                                         statusMsg = "API Key Verified • ${disc.models.size} models detected"
                                         val validModels = disc.models.map { it.id.removePrefix("models/").trim() }
-                                            .filter { it != "gemini-exp-1206" && it != "gemini-2.5-flash" }
+                                            .filter { it != "gemini-exp-1206" && !it.contains("-exp") && !it.contains("gemini-4-") }
                                         val combined = (validModels + GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS).distinct()
                                         discoveredModels = combined
                                         selectedFlash = disc.bestFlashModel.removePrefix("models/").trim()
@@ -1305,8 +1316,11 @@ fun ZeeNativeApp(
                                         keyVault.saveKey("gemini_flash_model", selectedFlash)
                                         keyVault.saveKey("gemini_pro_model", selectedPro)
                                     }.onFailure { err ->
-                                        // Fallback test
-                                        val diag = geminiClient.testAiConnection(clean)
+                                        // Fallback test with selected model
+                                        val diag = geminiClient.testAiConnection(
+                                            geminiKey = clean,
+                                            selectedModel = selectedFlash
+                                        )
                                         if (diag.contains("Connected") || diag.contains("Ready")) {
                                             isVerified = true
                                             statusMsg = diag
@@ -1394,13 +1408,21 @@ fun ZeeNativeApp(
                                             if (clean.isNotBlank()) {
                                                 keyVault.saveKey("gemini_api_key", clean)
                                             }
-                                            statusMsg = "Testing active Gemini models..."
+                                            statusMsg = "Testing selected model ($selectedFlash)..."
                                             val diag = geminiClient.testAiConnection(
                                                 geminiKey = clean,
+                                                selectedModel = selectedFlash,
                                                 groqKey = keyVault.getKey("groq_api_key"),
                                                 openRouterKey = keyVault.getKey("openrouter_api_key")
                                             )
                                             statusMsg = diag
+                                            if (diag.contains("Switched to Active:")) {
+                                                val candidate = diag.substringAfter("Switched to Active: ").substringBefore(" ").trim()
+                                                if (candidate.isNotBlank()) {
+                                                    selectedFlash = candidate
+                                                    keyVault.saveKey("gemini_flash_model", candidate)
+                                                }
+                                            }
                                             if (diag.contains("Connected") || diag.contains("Ready")) {
                                                 isVerified = true
                                                 keyVault.saveKey("gemini_api_status", "verified")
@@ -1466,7 +1488,7 @@ fun ZeeNativeApp(
                                         expanded = flashDropdownOpen,
                                         onDismissRequest = { flashDropdownOpen = false }
                                     ) {
-                                        discoveredModels.filter { it != "gemini-exp-1206" && it != "gemini-2.5-flash" && (it.contains("flash", ignoreCase = true) || !it.contains("pro", ignoreCase = true)) }.forEach { modelId ->
+                                        discoveredModels.filter { it != "gemini-exp-1206" && !it.contains("-exp") && !it.contains("gemini-4-") && (it.contains("flash", ignoreCase = true) || !it.contains("pro", ignoreCase = true)) }.forEach { modelId ->
                                             DropdownMenuItem(
                                                 text = { Text(modelId) },
                                                 onClick = {
@@ -1493,7 +1515,7 @@ fun ZeeNativeApp(
                                         expanded = proDropdownOpen,
                                         onDismissRequest = { proDropdownOpen = false }
                                     ) {
-                                        discoveredModels.filter { it != "gemini-exp-1206" && it != "gemini-2.5-flash" && (it.contains("pro", ignoreCase = true) || !it.contains("flash", ignoreCase = true)) }.forEach { modelId ->
+                                        discoveredModels.filter { it != "gemini-exp-1206" && !it.contains("-exp") && !it.contains("gemini-4-") && (it.contains("pro", ignoreCase = true) || !it.contains("flash", ignoreCase = true)) }.forEach { modelId ->
                                             DropdownMenuItem(
                                                 text = { Text(modelId) },
                                                 onClick = {
@@ -1526,6 +1548,8 @@ fun ZeeNativeApp(
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true
                             )
+
+                            Spacer(Modifier.height(4.dp))
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1606,9 +1630,9 @@ fun ZeeNativeApp(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(CardSurface, RoundedCornerShape(8.dp))
-                                    .border(1.dp, ElectricBlue.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                                    .padding(10.dp)
+                                    .background(Color(0xFF0F172A), RoundedCornerShape(10.dp))
+                                    .border(1.dp, Color(0xFF334155), RoundedCornerShape(10.dp))
+                                    .padding(12.dp)
                             ) {
                                 Text(
                                     "💡 Hugging Face গাইড: Hugging Face-এর অফিসিয়াল গুগল মডেল (যেমন Gemma 12B/27B) 'Gated' থাকে, যার জন্য টোকেন থাকা সত্ত্বেও ব্রাউজারে huggingface.co-তে লগইন করে মডেল পেইজে 'Acknowledge license' বাটনে একবার ক্লিক করতে হয়। কোনো টোকেন বা ঝামেলা ছাড়া সরাসরি ব্যবহারের জন্য 'মডেল ও কন্ট্রোল' ট্যাবে থাকা '⚡ 100% Free Direct' Gemma মডেলগুলো ডাউনলোড করুন।",
@@ -1657,6 +1681,59 @@ fun ZeeNativeApp(
                                 color = Silver,
                                 fontSize = 11.sp
                             )
+
+                            HorizontalDivider(color = Color(0xFF1E293B))
+                            Text("Private Offline Best-Friend Memory", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text(
+                                "100% offline & private on-device storage. ZEE/ZHEE automatically stores your feelings, dreams, preferences, and memories.",
+                                color = Silver,
+                                fontSize = 11.sp
+                            )
+                            var refreshMemoryCounter by remember { mutableStateOf(0) }
+                            val offlineMemories = remember(refreshMemoryCounter) { offlineMemoryVault.getAllMemories() }
+                            val userNick = offlineMemoryVault.getNickname()
+                            if (!userNick.isNullOrBlank()) {
+                                Text("Friend's Nickname: $userNick", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
+                            if (offlineMemories.isEmpty()) {
+                                Text("No private memories stored yet. Talk with ZEE/ZHEE to start creating personal memories.", color = Silver.copy(alpha = 0.7f), fontSize = 11.sp)
+                            } else {
+                                Text("Saved Personal Notes (${offlineMemories.size}):", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                offlineMemories.take(12).forEach { item ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color(0xFF0F172A), RoundedCornerShape(6.dp))
+                                            .padding(8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(item.fact, color = Color.White, fontSize = 11.sp)
+                                            Text("${item.category} • ${item.timestamp}", color = Silver.copy(alpha = 0.6f), fontSize = 10.sp)
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                offlineMemoryVault.deleteMemory(item.id)
+                                                refreshMemoryCounter++
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(Icons.Default.Close, contentDescription = "Delete", tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                }
+                                Button(
+                                    onClick = {
+                                        offlineMemoryVault.clearAll()
+                                        refreshMemoryCounter++
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7F1D1D)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Clear All Private Offline Memories", color = Color(0xFFFCA5A5), fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                 }
