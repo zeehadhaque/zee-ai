@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.provider.Settings
+import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -38,6 +39,7 @@ import com.zeeai.companion.ai.GeminiNativeClient
 import com.zeeai.companion.automation.NativePhoneCommander
 import com.zeeai.companion.automation.PendingConfirmation
 import com.zeeai.companion.automation.PhoneCommandOutcome
+import com.zeeai.companion.automation.PhoneControlScreen
 import com.zeeai.companion.automation.ZeeAccessibilityService
 import com.zeeai.companion.data.local.ChatMessageEntity
 import com.zeeai.companion.data.local.MemoryEntity
@@ -109,6 +111,7 @@ fun ZeeNativeApp(
         NativeVoiceController(context) { speaking -> isSpeaking = speaking }
     }
     val isMicLockedOn by voiceController.isMicLockedOn.collectAsState()
+    val voiceState by voiceController.voiceState.collectAsState()
     val isAccessibilityConnected by ZeeAccessibilityService.isConnected.collectAsState()
     var isAccessibilityActive by remember {
         mutableStateOf(ZeeAccessibilityService.isServiceEnabled(context))
@@ -318,6 +321,18 @@ fun ZeeNativeApp(
         }
     }
 
+    val speechDialogLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val spoken = matches?.firstOrNull().orEmpty().trim()
+            if (spoken.isNotBlank()) {
+                sendUserTurn(spoken)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         WakeWordEventBus.detections.collect { event ->
             activeCharId = event.targetCharacterId
@@ -393,6 +408,7 @@ fun ZeeNativeApp(
 
                         listOf(
                             Triple("companion", "ZEE / ZHEE Companion", "🎙️"),
+                            Triple("phone_control", "Phone Full Control (Commander)", "📱"),
                             Triple("council", "AI Council (Multi-Model)", "⚖️"),
                             Triple("youtube", "YouTube Automation Studio", "📺"),
                             Triple("filmmaker", "ZEE Cinema & Video Gen", "🎬"),
@@ -428,9 +444,9 @@ fun ZeeNativeApp(
                     NavigationBar(containerColor = CardSurface) {
                         listOf(
                             Triple("companion", "ZEE/ZHEE", "🎙️"),
+                            Triple("phone_control", "Phone", "📱"),
                             Triple("youtube", "YouTube", "📺"),
                             Triple("filmmaker", "Cinema", "🎬"),
-                            Triple("research", "Research", "📡"),
                             Triple("models", "Models", "🧠")
                         ).forEach { (id, label, iconEmoji) ->
                             NavigationBarItem(
@@ -618,19 +634,25 @@ fun ZeeNativeApp(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                        .background(Color(0xFF030712), RoundedCornerShape(8.dp))
+                                        .border(1.dp, Color(0xFFDC2626).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Box(
                                             modifier = Modifier
-                                                .size(10.dp)
+                                                .size(8.dp)
                                                 .background(Color(0xFFDC2626), CircleShape)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            "MIC LOCKED ON (Tap Mic to Stop)",
+                                            when (voiceState) {
+                                                com.zeeai.companion.voice.VoiceState.HEARING -> "MIC: Hearing speech..."
+                                                com.zeeai.companion.voice.VoiceState.SPEAKING -> "MIC: ZEE is replying..."
+                                                else -> "MIC LOCKED ON (Listening...)"
+                                            },
                                             color = Color(0xFFF87171),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
@@ -638,7 +660,7 @@ fun ZeeNativeApp(
                                     }
                                     if (livePartialVoice.isNotBlank()) {
                                         Text(
-                                            livePartialVoice.take(24) + if (livePartialVoice.length > 24) "..." else "",
+                                            livePartialVoice.take(28) + if (livePartialVoice.length > 28) "..." else "",
                                             color = Cyan,
                                             fontSize = 11.sp,
                                             maxLines = 1
@@ -651,7 +673,7 @@ fun ZeeNativeApp(
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Button(
                                     onClick = {
@@ -680,27 +702,63 @@ fun ZeeNativeApp(
                                     },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = if (isMicLockedOn) Color(0xFFDC2626) else ElectricBlue
-                                    )
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                 ) {
-                                    Text(if (isMicLockedOn) "Stop" else "Mic", fontSize = 12.sp)
+                                    Text(if (isMicLockedOn) "🛑 Stop" else "🎙️ Mic", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        if (!hasMic) {
+                                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                            return@IconButton
+                                        }
+                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, voiceProfile.languageTag)
+                                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Bolo ZEE / ZHEE ke...")
+                                        }
+                                        runCatching { speechDialogLauncher.launch(intent) }
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Text("🗣️", fontSize = 16.sp)
                                 }
 
                                 OutlinedTextField(
                                     value = textInput,
                                     onValueChange = { textInput = it },
                                     modifier = Modifier.weight(1f),
-                                    placeholder = { Text("Bolo ba likho...", fontSize = 13.sp) },
+                                    placeholder = { Text("Bolo ba likho...", fontSize = 12.sp) },
                                     singleLine = true
                                 )
 
                                 Button(
                                     onClick = { sendUserTurn(textInput) },
-                                    enabled = textInput.isNotBlank() && !isGenerating
+                                    enabled = textInput.isNotBlank() && !isGenerating,
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
-                                    Text("Send", fontSize = 12.sp)
+                                    Text("Send", fontSize = 11.sp)
                                 }
                             }
                         }
+
+                        "phone_control" -> PhoneControlScreen(
+                            context = context,
+                            phoneCommander = phoneCommander,
+                            voiceController = voiceController,
+                            voiceProfile = voiceProfile,
+                            isNetworkAvailable = { isNetworkAvailable() },
+                            isAccessibilityActive = isAccessibilityActive,
+                            isAccessibilityConnected = isAccessibilityConnected,
+                            hasMic = hasMic,
+                            onRequestMic = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                            activeCharId = activeCharId,
+                            onCharChanged = { activeCharId = it },
+                            onGeneralPrompt = { sendUserTurn(it) },
+                            onShowConfirmation = { pendingConfirm = it }
+                        )
 
                         "youtube" -> YouTubeStudioScreen(
                             activeCharId = activeCharId,
@@ -1209,7 +1267,7 @@ fun ZeeNativeApp(
                                                 isHfValidating = false
                                                 res.onSuccess { username ->
                                                     isHfConnected = true
-                                                    hfStatusMsg = "Connected as @$username (Hugging Face Verified)"
+                                                    hfStatusMsg = "Success: Connected as @$username (Hugging Face Verified)"
                                                     keyVault.saveKey("hf_token", clean)
                                                     keyVault.saveKey("hf_token_status", "connected")
                                                     keyVault.saveKey("hf_status_msg", hfStatusMsg)
@@ -1233,7 +1291,7 @@ fun ZeeNativeApp(
                                         Spacer(Modifier.width(6.dp))
                                         Text("Verifying...")
                                     } else {
-                                        Text("Connect Hugging Face")
+                                        Text(if (isHfConnected) "Connected (Success)" else "Connect Hugging Face")
                                     }
                                 }
 

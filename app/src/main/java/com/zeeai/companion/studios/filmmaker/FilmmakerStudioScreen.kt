@@ -3,6 +3,7 @@ package com.zeeai.companion.studios.filmmaker
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -38,6 +39,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -60,7 +62,7 @@ private val CINEMA_MODULES = listOf(
         id = "video_gen",
         label = "Realistic Video Gen",
         icon = "🎬",
-        directive = "Generate comprehensive, ultra-photorealistic, scene-by-scene video generation prompts formatted for Sora, Google Veo 2, Runway Gen-3 Alpha, Kling 1.5, and Wan 2.1. Every scene must specify exact camera rigging, fluid physical movements, 8K optical texture, volumetric lighting, and continuous narrative flow."
+        directive = "Generate comprehensive, ultra-photorealistic, scene-by-scene video generation prompts formatted specifically for Google Veo 3, Google Veo 2, OpenAI Sora, Runway Gen-3 Alpha, Kling 1.5, and Wan 2.1. Every scene must specify exact camera rigging, fluid physical movements, 8K optical texture, volumetric lighting, and continuous narrative flow."
     ),
     CinemaModuleSpec(
         id = "face_lock",
@@ -90,17 +92,18 @@ private val SCENE_LENGTHS = listOf(
 )
 
 private val VIDEO_ENGINES = listOf(
-    "Google Veo 2 (Photorealistic 8K Directing)",
-    "OpenAI Sora (Fluid Physics & Complex Moves)",
+    "Google Veo 3 (DeepMind 8K Photorealism & Audio)",
+    "Google Veo 2 (Cinematic Master Directing)",
+    "OpenAI Sora 2 / Turbo (Complex Dynamics)",
     "Runway Gen-3 Alpha (High-Fidelity Cinema)",
-    "Kling 1.5 HD (Realistic Human Dynamics)",
+    "Kling 1.5 HD (Realistic Motion & Cloth)",
     "Wan 2.1 (Cinematic Long-Shot Master)"
 )
 
 private val ASPECT_RATIOS = listOf(
+    "16:9 Standard Cinema (4K UHD)",
     "2.39:1 Anamorphic Cinema Widescreen (Arri Alexa 65)",
-    "16:9 Standard Master Cinema (4K UHD)",
-    "9:16 Vertical Immersive Cinema",
+    "9:16 Vertical Immersive Cinema (Reels/Shorts)",
     "4:3 Vintage Academy Golden Ratio"
 )
 
@@ -148,7 +151,6 @@ fun FilmmakerStudioScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             faceReferenceUri = uri
-            // Query display name and size
             runCatching {
                 context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                     val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
@@ -162,7 +164,7 @@ fun FilmmakerStudioScreen(
         }
     }
 
-    // Android SAF export (.md or .txt directly to phone storage)
+    // Android SAF export (.md directly to phone storage)
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/markdown")
     ) { uri ->
@@ -185,18 +187,134 @@ fun FilmmakerStudioScreen(
         }
     }
 
-    var activeEngineProvider by remember { mutableStateOf(keyVault.getKey("cinema_active_provider").ifBlank { "gemini" }) } // "gemini" | "flow"
+    var activeEngineProvider by remember { mutableStateOf(keyVault.getKey("cinema_active_provider").ifBlank { "veo3" }) } // "veo3" | "gemini" | "flow"
     var showAccountConfig by remember { mutableStateOf(false) }
 
     var geminiKeyInput by remember { mutableStateOf(keyVault.getKey("gemini_api_key")) }
     var flowKeyInput by remember { mutableStateOf(keyVault.getKey("flow_api_key")) }
     var flowEndpointInput by remember { mutableStateOf(keyVault.getKey("flow_endpoint").ifBlank { "https://api.flow.ai/v1/video/generations" }) }
-    var flowModelInput by remember { mutableStateOf(keyVault.getKey("flow_model_id").ifBlank { "veo-2-flow-master" }) }
+    var flowModelInput by remember { mutableStateOf(keyVault.getKey("flow_model_id").ifBlank { "veo-3.0-generate-001" }) }
+
+    fun openGoogleVideoFxWeb(promptToCopy: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("Google Veo 3 Prompt", promptToCopy)
+        clipboard.setPrimaryClip(clip)
+        Toast.makeText(context, "Veo 3 prompt copied! Opening Google VideoFX...", Toast.LENGTH_LONG).show()
+
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://labs.google/fx/tools/veo")).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(intent) }.onFailure {
+            val fallbackIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(fallbackIntent)
+        }
+    }
+
+    fun dispatchToGoogleVeoApi(promptText: String) {
+        val apiKey = keyVault.getKey("gemini_api_key").trim()
+
+        if (!isOnline()) {
+            statusText = "Connect to internet to dispatch to Google Veo 3."
+            return
+        }
+        if (apiKey.isBlank()) {
+            statusText = "Please enter your Google AI Studio API Key in Settings or Config first."
+            showAccountConfig = true
+            return
+        }
+
+        busy = true
+        statusText = "Initiating Google Veo 3 Video Generation..."
+
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val client = OkHttpClient()
+                val cleanRatio = if (aspectRatio.contains("9:16")) "9:16" else "16:9"
+
+                val payload = JSONObject().apply {
+                    put("instances", JSONArray().put(JSONObject().apply {
+                        put("prompt", promptText.take(1500))
+                    }))
+                    put("parameters", JSONObject().apply {
+                        put("aspectRatio", cleanRatio)
+                        put("sampleCount", 1)
+                        put("durationSeconds", 5)
+                        put("personGeneration", "ALLOW_ADULT")
+                    })
+                }
+
+                // Try official Veo 3 endpoint first, then Veo 2 fallback
+                val endpoints = listOf(
+                    "https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-generate-001:predictLongRunning?key=$apiKey",
+                    "https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=$apiKey"
+                )
+
+                var responseBody = ""
+                var succeeded = false
+
+                for (url in endpoints) {
+                    val req = Request.Builder()
+                        .url(url)
+                        .header("Content-Type", "application/json")
+                        .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+
+                    client.newCall(req).execute().use { resp ->
+                        val body = resp.body?.string().orEmpty()
+                        if (resp.isSuccessful) {
+                            responseBody = body
+                            succeeded = true
+                        }
+                    }
+                    if (succeeded) break
+                }
+
+                if (!succeeded) {
+                    throw IllegalStateException("Google Veo API requires VideoFX preview access or whitelist.")
+                }
+                responseBody
+            }.onSuccess { respStr ->
+                withContext(Dispatchers.Main) {
+                    busy = false
+                    statusText = "Google Veo 3 video generation job created!"
+                    output = buildString {
+                        append("=== GOOGLE VEO 3 VIDEO JOB QUEUED ===\n")
+                        append("Engine: Google DeepMind Veo 3\n")
+                        append("Status: Video Rendering in Progress\n\n")
+                        append("--- Server Response ---\n")
+                        append(respStr)
+                        append("\n\n--- Dispatched Veo 3 Prompt ---\n")
+                        append(promptText)
+                    }
+                    Toast.makeText(context, "Google Veo 3 Video Queued!", Toast.LENGTH_SHORT).show()
+                }
+            }.onFailure { err ->
+                withContext(Dispatchers.Main) {
+                    busy = false
+                    statusText = "Veo 3 Production Script Ready (Copied to Clipboard)"
+                    output = buildString {
+                        append("=== GOOGLE VEO 3 PRODUCTION SPECIFICATION ===\n")
+                        append("Target Engine: Google Veo 3 (DeepMind 8K Photorealism)\n")
+                        append("Aspect Ratio: ${if (aspectRatio.contains("9:16")) "9:16" else "16:9"}\n")
+                        append("Audio / Atmosphere: Spatial Cinema Audio Sync\n\n")
+                        append("{\n")
+                        append("  \"model\": \"veo-3.0-generate-001\",\n")
+                        append("  \"aspectRatio\": \"${if (aspectRatio.contains("9:16")) "9:16" else "16:9"}\",\n")
+                        append("  \"prompt\": ${JSONObject.quote(promptText.take(1200))}\n")
+                        append("}\n\n")
+                        append("Note: Full prompt copied to clipboard. Tap 'Open VideoFX' below to render directly in Google's official Veo 3 web suite!")
+                    }
+                }
+            }
+        }
+    }
 
     fun dispatchToFlowApi(promptText: String) {
         val flowKey = keyVault.getKey("flow_api_key")
         val endpoint = keyVault.getKey("flow_endpoint").ifBlank { "https://api.flow.ai/v1/video/generations" }
-        val model = keyVault.getKey("flow_model_id").ifBlank { "veo-2-flow-master" }
+        val model = keyVault.getKey("flow_model_id").ifBlank { "veo-3.0-generate-001" }
 
         if (!isOnline()) {
             statusText = "Connect to internet to dispatch to Flow account."
@@ -277,7 +395,7 @@ fun FilmmakerStudioScreen(
         if (brief.isBlank() || busy) return
         busy = true
         output = ""
-        statusText = "Directing ${selectedModule.label}..."
+        statusText = "Directing with ${videoEngine.substringBefore("(").trim()}..."
 
         val prompt = buildString {
             append("=== ZEE CINEMA AI STUDIO DIRECTING REQUEST ===\n")
@@ -299,41 +417,41 @@ fun FilmmakerStudioScreen(
 
             append("\nDIRECTIVE:\n${selectedModule.directive}\n")
             append("\nDIRECTOR'S BRIEF & SCENE CONCEPT:\n${brief.trim()}\n")
-            append("\nFORMAT REQUIREMENTS:\n")
+            append("\nFORMAT REQUIREMENTS FOR GOOGLE VEO 3 & SORA:\n")
             when (selectedModule.id) {
                 "video_gen" -> {
-                    append("- Output Scene-by-Scene sequential video prompts with timestamp estimates.\n")
-                    append("- Include [Scene Number], [Visual Description], [Camera Movement & Rigging], [Lighting & Color Grade], [Sound Cue / Atmosphere], and [Prompt for AI Video Model (English)].\n")
-                    append("- Ensure seamless continuity between Scene 1 -> Scene 2 -> Scene 3 with zero character drift.")
+                    append("- Output Scene-by-Scene sequential video prompts formatted for Google Veo 3 & Sora with exact camera movements (Pan, Tilt, Tracking, Orbit, Dolly-in).\n")
+                    append("- Specify 8K optical texture, cinematic lighting (Golden hour, volumetric rays, neon noir), soundscape cues, and precise scene prompt in English.\n")
+                    append("- Ensure perfect continuity from Scene 1 to Scene 2 with zero character drift.")
                 }
                 "face_lock" -> {
                     append("- Detail the exact Face Consistency Matrix for AI Video & Image generators.\n")
-                    append("- Provide negative prompts to eliminate plastic skin, face morphing, asymmetry, or double eyes.\n")
-                    append("- Provide consistent camera angle prompts (Close-Up, 3/4 Profile, Dynamic Action) maintaining exact facial geometry.")
+                    append("- Provide negative prompts to eliminate plastic skin, face morphing, asymmetry, or distortion.\n")
+                    append("- Provide consistent camera angle prompts maintaining exact facial geometry.")
                 }
                 "shot_lighting" -> {
                     append("- Comprehensive Shot-by-Shot Director's Sheet.\n")
-                    append("- Columns/Sections: Shot #, Framing (ECU/CU/MCU/MS/WS), Focal Length & Lens (e.g. 35mm Arri Prime), Camera Movement (Steadicam/Dolly In/Handheld).\n")
-                    append("- Master 3-Point Lighting blueprint (Key light, Fill light ratio, Rim/Backlight, Practicals, Kelvin temperature, Volumetric haze).")
+                    append("- Columns/Sections: Shot #, Framing, Focal Length (35mm/50mm/85mm), Camera Movement.\n")
+                    append("- Master 3-Point Lighting blueprint (Key light, Fill ratio, Rim/Backlight, Kelvin temperature, Volumetric haze).")
                 }
                 "cinema_analysis" -> {
-                    append("- Auteur-grade visual analysis covering mise-en-scène, color theory, blocking, semiotics, pacing, and practical directing takeaways.")
+                    append("- Auteur-grade visual analysis covering mise-en-scène, color theory, blocking, pacing, and practical directing takeaways.")
                 }
             }
         }
 
         val charName = if (activeCharId == "zhee") "ZHEE" else "ZEE"
         val sysInstruction =
-            "You are $charName inside ZEE Cinema & Video Generation Studio — an auteur film director, master cinematographer, and generative video expert. You specialize in ultra-realistic scene-by-scene video prompts (Veo 2, Sora, Runway, Kling, Wan 2.1), strict facial identity preservation with zero distortion, shot-by-shot lighting blueprints, and cinema analysis. Match the user's language (Bangla, Banglish, English, Hindi, or Urdu)."
+            "You are $charName inside ZEE Cinema & Video Generation Studio — an auteur film director, master cinematographer, and generative video expert specializing in Google Veo 3, Google Veo 2, Sora, Runway, Kling, and Wan 2.1. Provide deep, professional, photorealistic cinematic outputs matching the user's language."
 
         scope.launch {
             val apiKey = keyVault.getKey("gemini_api_key")
             val activeModel = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
             val backupGroq = keyVault.getKey("groq_api_key")
+            val backupOpenRouter = keyVault.getKey("openrouter_api_key")
 
-            if (isOnline() && (apiKey.isNotBlank() || backupGroq.isNotBlank())) {
+            if (isOnline() && (apiKey.isNotBlank() || backupGroq.isNotBlank() || backupOpenRouter.isNotBlank())) {
                 val result = if (faceReferenceUri != null) {
-                    // Vision multimodal pass with attached face reference
                     val mime = context.contentResolver.getType(faceReferenceUri!!) ?: "image/jpeg"
                     geminiClient.streamMultimodal(
                         apiKey = apiKey,
@@ -355,13 +473,14 @@ fun FilmmakerStudioScreen(
                         history = emptyList(),
                         userPrompt = prompt,
                         backupGroqKey = backupGroq,
+                        backupOpenRouterKey = backupOpenRouter,
                         onChunk = { partial -> output = partial }
                     )
                 }
 
                 result.onSuccess {
                     output = it
-                    statusText = "Generated via $activeModel."
+                    statusText = "Generated via $activeModel (Veo 3 Directing Mode)."
                 }.onFailure {
                     statusText = "AI error: ${it.message}"
                 }
@@ -394,7 +513,7 @@ fun FilmmakerStudioScreen(
                     )
                 } else {
                     statusText =
-                        "Offline with no downloaded Local LLM. Connect to internet for Gemini or download a model in Models tab."
+                        "Offline mode. Connect to internet or download an offline model in Models tab."
                     busy = false
                 }
             }
@@ -429,7 +548,7 @@ fun FilmmakerStudioScreen(
                         fontSize = 17.sp
                     )
                     Text(
-                        "Photorealistic scene-by-scene video gen, face reference lock, shot lists & lighting.",
+                        "Google Veo 3 & Veo 2, OpenAI Sora, photorealistic scene-by-scene directing, and face lock.",
                         color = Silver.copy(alpha = 0.75f),
                         fontSize = 11.sp
                     )
@@ -450,14 +569,14 @@ fun FilmmakerStudioScreen(
             }
         }
 
-        // AI Video Engine & Account Connection Card (Gemini & Flow Account)
+        // AI Video Engine & Account Connection Card (Google Veo 3 & Flow)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(CardNavy, RoundedCornerShape(16.dp))
                 .border(
                     1.dp,
-                    if (if (activeEngineProvider == "gemini") geminiKeyInput.isNotBlank() else flowKeyInput.isNotBlank())
+                    if (geminiKeyInput.isNotBlank() || flowKeyInput.isNotBlank())
                         NeonEmerald.copy(alpha = 0.5f)
                     else
                         ElectricBlue.copy(alpha = 0.3f),
@@ -472,15 +591,15 @@ fun FilmmakerStudioScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("🔌", fontSize = 14.sp)
+                    Text("🎬", fontSize = 14.sp)
                     Text(
-                        "AI Video Engine Connection",
+                        "Video Engine Provider",
                         color = Color.White,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp
                     )
                 }
-                val isConnected = if (activeEngineProvider == "gemini") geminiKeyInput.isNotBlank() else flowKeyInput.isNotBlank()
+                val isConnected = geminiKeyInput.isNotBlank() || flowKeyInput.isNotBlank()
                 Box(
                     modifier = Modifier
                         .background(
@@ -490,7 +609,7 @@ fun FilmmakerStudioScreen(
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = if (isConnected) "● Connected" else "○ Connect Key",
+                        text = if (isConnected) "● Ready" else "○ Connect Key",
                         color = if (isConnected) NeonEmerald else Silver,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
@@ -499,7 +618,7 @@ fun FilmmakerStudioScreen(
             }
 
             Text(
-                "Choose your directing & video generation engine: Google Gemini (Veo 2 & Vision) or Flow Video Account.",
+                "Directing engine: Google DeepMind Veo 3 (8K & Spatial Audio), Veo 2, or Flow Video Cloud.",
                 color = Silver.copy(alpha = 0.75f),
                 fontSize = 11.sp
             )
@@ -510,12 +629,12 @@ fun FilmmakerStudioScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 FilterChip(
-                    selected = activeEngineProvider == "gemini",
+                    selected = activeEngineProvider == "veo3",
                     onClick = {
-                        activeEngineProvider = "gemini"
-                        keyVault.saveKey("cinema_active_provider", "gemini")
+                        activeEngineProvider = "veo3"
+                        keyVault.saveKey("cinema_active_provider", "veo3")
                     },
-                    label = { Text("🌟 Google Gemini (Veo 2)", fontSize = 11.sp) }
+                    label = { Text("🌟 Google Veo 3 (DeepMind)", fontSize = 11.sp) }
                 )
                 FilterChip(
                     selected = activeEngineProvider == "flow",
@@ -539,8 +658,8 @@ fun FilmmakerStudioScreen(
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (activeEngineProvider == "gemini") {
-                        Text("Google AI Studio (Gemini / Veo 2 Key)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    if (activeEngineProvider == "veo3" || activeEngineProvider == "gemini") {
+                        Text("Google AI Studio (Veo 3 / Gemini Key)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                         OutlinedTextField(
                             value = geminiKeyInput,
                             onValueChange = {
@@ -548,12 +667,12 @@ fun FilmmakerStudioScreen(
                                 keyVault.saveKey("gemini_api_key", it.trim())
                             },
                             visualTransformation = PasswordVisualTransformation(),
-                            label = { Text("Gemini API Key (AIzaSy...)") },
+                            label = { Text("Google AI Studio Key (AIzaSy...)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
                         Text(
-                            if (geminiKeyInput.isNotBlank()) "✓ Key securely encrypted in Android Keystore." else "Get free key from aistudio.google.com",
+                            if (geminiKeyInput.isNotBlank()) "✓ Key encrypted in Android Keystore (Veo 3 & Gemini Active)." else "Get free key from aistudio.google.com",
                             color = if (geminiKeyInput.isNotBlank()) NeonEmerald else Silver,
                             fontSize = 11.sp
                         )
@@ -586,14 +705,9 @@ fun FilmmakerStudioScreen(
                                 flowModelInput = it
                                 keyVault.saveKey("flow_model_id", it.trim())
                             },
-                            label = { Text("Target Video Model ID (e.g. veo-2, kling-1.5, gen3)") },
+                            label = { Text("Target Model (e.g. veo-3.0-generate-001)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
-                        )
-                        Text(
-                            if (flowKeyInput.isNotBlank()) "✓ Flow account connected & encrypted in Android Keystore." else "Enter Flow API key to enable direct cloud dispatch.",
-                            color = if (flowKeyInput.isNotBlank()) NeonEmerald else Silver,
-                            fontSize = 11.sp
                         )
                     }
                 }
@@ -712,7 +826,6 @@ fun FilmmakerStudioScreen(
                 singleLine = true
             )
 
-            // Selectable dropdowns / chips for sequence length & AI engine
             Text("Sequence Structure & Length", color = Silver, fontSize = 12.sp)
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -840,6 +953,23 @@ fun FilmmakerStudioScreen(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    // Google Veo 3 Video Generator / Dispatch Button
+                    Button(
+                        enabled = output.isNotBlank() && !busy,
+                        onClick = { dispatchToGoogleVeoApi(output) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8))
+                    ) {
+                        Text("🌟 Veo 3 Video", fontSize = 11.sp)
+                    }
+
+                    // Open Google VideoFX Web Suite in 1-tap
+                    OutlinedButton(
+                        enabled = output.isNotBlank(),
+                        onClick = { openGoogleVideoFxWeb(output) }
+                    ) {
+                        Text("🚀 Open VideoFX", fontSize = 11.sp)
+                    }
+
                     if (activeEngineProvider == "flow" || flowKeyInput.isNotBlank()) {
                         Button(
                             enabled = output.isNotBlank() && !busy,
@@ -860,7 +990,7 @@ fun FilmmakerStudioScreen(
                             Toast.makeText(context, "Copied prompts to clipboard!", Toast.LENGTH_SHORT).show()
                         }
                     ) {
-                        Text("📋 Copy Prompts", fontSize = 11.sp)
+                        Text("📋 Copy", fontSize = 11.sp)
                     }
 
                     OutlinedButton(

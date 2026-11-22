@@ -24,6 +24,14 @@ data class NativeVoiceProfile(
     val isFemale: Boolean = false
 )
 
+enum class VoiceState {
+    IDLE,
+    LISTENING,
+    HEARING,
+    SPEAKING,
+    ERROR
+}
+
 class NativeVoiceController(
     private val context: Context,
     private val onSpeakingStateChanged: (Boolean) -> Unit
@@ -35,6 +43,9 @@ class NativeVoiceController(
 
     private val _isMicLockedOn = MutableStateFlow(false)
     val isMicLockedOn: StateFlow<Boolean> = _isMicLockedOn.asStateFlow()
+
+    private val _voiceState = MutableStateFlow(VoiceState.IDLE)
+    val voiceState: StateFlow<VoiceState> = _voiceState.asStateFlow()
 
     private var isTtsSpeaking = false
     private var activeLanguageTag: String = "bn-BD"
@@ -55,8 +66,9 @@ class NativeVoiceController(
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     isTtsSpeaking = true
+                    _voiceState.value = VoiceState.SPEAKING
                     onSpeakingStateChanged(true)
-                    // Pause active speech recognition so AI doesn't hear its own voice
+                    // Pause active speech recognition so AI does not hear its own voice
                     mainHandler.post {
                         recognizer?.cancel()
                     }
@@ -67,7 +79,11 @@ class NativeVoiceController(
                     onSpeakingStateChanged(false)
                     // Resume listening automatically if Mic is locked on
                     if (_isMicLockedOn.value) {
+                        _voiceState.value = VoiceState.LISTENING
+                        mainHandler.removeCallbacks(restartListeningRunnable)
                         mainHandler.postDelayed(restartListeningRunnable, 250L)
+                    } else {
+                        _voiceState.value = VoiceState.IDLE
                     }
                 }
 
@@ -76,7 +92,11 @@ class NativeVoiceController(
                     isTtsSpeaking = false
                     onSpeakingStateChanged(false)
                     if (_isMicLockedOn.value) {
+                        _voiceState.value = VoiceState.LISTENING
+                        mainHandler.removeCallbacks(restartListeningRunnable)
                         mainHandler.postDelayed(restartListeningRunnable, 250L)
+                    } else {
+                        _voiceState.value = VoiceState.IDLE
                     }
                 }
             })
@@ -84,37 +104,91 @@ class NativeVoiceController(
     }
 
     fun speak(text: String, profile: NativeVoiceProfile) {
-        if (!ttsReady || text.isBlank()) return
+        if (text.isBlank()) return
+        if (!ttsReady) {
+            mainHandler.postDelayed({
+                if (ttsReady) speak(text, profile)
+            }, 350L)
+            return
+        }
+
         stopSpeaking() // Instant interruption
         val clean = text.replace(Regex("\\[.*?\\]"), "").trim()
-        val loc = Locale.forLanguageTag(profile.languageTag)
-        tts?.language = loc
+        if (clean.isEmpty()) return
+
+        // Script detection for offline synthesis
+        val hasBengali = clean.any { it in '\u0980'..'\u09FF' }
+        val hasHindi = clean.any { it in '\u0900'..'\u097F' }
+        val targetLocale = when {
+            hasBengali -> Locale.forLanguageTag("bn-BD")
+            hasHindi -> Locale.forLanguageTag("hi-IN")
+            else -> Locale.forLanguageTag(profile.languageTag)
+        }
+
+        var langStatus = tts?.setLanguage(targetLocale)
+        if (langStatus == TextToSpeech.LANG_MISSING_DATA || langStatus == TextToSpeech.LANG_NOT_SUPPORTED) {
+            if (hasBengali) {
+                langStatus = tts?.setLanguage(Locale.forLanguageTag("bn-IN"))
+                if (langStatus == TextToSpeech.LANG_MISSING_DATA || langStatus == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    langStatus = tts?.setLanguage(Locale.forLanguageTag("bn"))
+                }
+            }
+            if (langStatus == TextToSpeech.LANG_MISSING_DATA || langStatus == TextToSpeech.LANG_NOT_SUPPORTED) {
+                tts?.setLanguage(Locale.getDefault())
+            }
+        }
+
+        // Distinct acoustic vocal personas
         tts?.setPitch(profile.pitch)
         tts?.setSpeechRate(profile.rate)
 
         try {
-            tts?.voices?.let { voices ->
-                val langVoices = voices.filter { it.locale.language == loc.language }
+            tts?.voices?.let { allVoices ->
+                val activeLang = tts?.voice?.locale?.language ?: targetLocale.language
+                val langVoices = allVoices.filter { it.locale.language.equals(activeLang, ignoreCase = true) }
+                val pool = if (langVoices.isNotEmpty()) langVoices else allVoices.toList()
+
+                // Prioritize offline / embedded voices
+                val offlineVoices = pool.filter { !it.isNetworkConnectionRequired }
+                val targetPool = if (offlineVoices.isNotEmpty()) offlineVoices else pool
+
                 val targetVoice = if (profile.isFemale) {
-                    langVoices.firstOrNull { it.name.contains("female", ignoreCase = true) || it.name.contains("-f-", ignoreCase = true) }
-                        ?: voices.firstOrNull { it.name.contains("female", ignoreCase = true) }
+                    targetPool.firstOrNull { v ->
+                        v.name.contains("female", ignoreCase = true) ||
+                        v.name.contains("-f-", ignoreCase = true) ||
+                        v.name.contains("fem", ignoreCase = true)
+                    } ?: targetPool.firstOrNull()
                 } else {
-                    langVoices.firstOrNull { it.name.contains("male", ignoreCase = true) || it.name.contains("-m-", ignoreCase = true) }
-                        ?: voices.firstOrNull { it.name.contains("male", ignoreCase = true) }
+                    targetPool.firstOrNull { v ->
+                        v.name.contains("male", ignoreCase = true) ||
+                        v.name.contains("-m-", ignoreCase = true) ||
+                        v.name.contains("masc", ignoreCase = true)
+                    } ?: targetPool.firstOrNull()
                 }
+
                 if (targetVoice != null) {
                     tts?.voice = targetVoice
                 }
             }
         } catch (_: Exception) {}
 
-        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "zee_utt_${System.currentTimeMillis()}")
+        val params = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "zee_utt_${System.currentTimeMillis()}")
+        }
+
+        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, params, "zee_utt_${System.currentTimeMillis()}")
     }
 
     fun stopSpeaking() {
         tts?.stop()
         isTtsSpeaking = false
         onSpeakingStateChanged(false)
+        if (_isMicLockedOn.value) {
+            _voiceState.value = VoiceState.LISTENING
+        } else {
+            _voiceState.value = VoiceState.IDLE
+        }
     }
 
     private fun isNetworkAvailable(): Boolean {
@@ -136,6 +210,7 @@ class NativeVoiceController(
     ) {
         stopSpeaking() // Barge-in immediately
         _isMicLockedOn.value = true
+        _voiceState.value = VoiceState.LISTENING
 
         activeLanguageTag = languageTag
         activePreferOffline = preferOffline
@@ -146,105 +221,144 @@ class NativeVoiceController(
         // Eliminate wake-word vs manual mic clash: pause wake word service first
         WakeWordForegroundService.pause(context)
 
-        // Wait 250ms on main looper so background service recognizer finishes releasing the audio hardware
+        // Wait 200ms on main looper so audio hardware finishes releasing
         mainHandler.removeCallbacks(restartListeningRunnable)
         mainHandler.postDelayed({
             if (_isMicLockedOn.value) {
                 startListeningInternal()
             }
-        }, 250L)
+        }, 200L)
     }
 
     private fun startListeningInternal() {
         if (!_isMicLockedOn.value || isTtsSpeaking) return
 
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            _isMicLockedOn.value = false
-            WakeWordForegroundService.resume(context)
-            activeOnError?.invoke("Android Speech Recognition service is not available on this device.")
-            return
-        }
+        mainHandler.post {
+            destroyRecognizerInternal()
 
-        destroyRecognizerInternal()
+            val sr = runCatching {
+                SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
+            }.getOrElse {
+                runCatching {
+                    SpeechRecognizer.createSpeechRecognizer(context)
+                }.getOrNull()
+            }
 
-        val sr = SpeechRecognizer.createSpeechRecognizer(context)
-        sr.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            if (sr == null) {
+                _isMicLockedOn.value = false
+                _voiceState.value = VoiceState.ERROR
+                WakeWordForegroundService.resume(context)
+                activeOnError?.invoke("Android Speech Recognition service is not available.")
+                return@post
+            }
 
-            override fun onError(error: Int) {
-                if (!_isMicLockedOn.value) {
-                    WakeWordForegroundService.resume(context)
-                    activeOnError?.invoke("Voice recognition error code: $error")
-                    return
+            sr.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    if (_isMicLockedOn.value && !isTtsSpeaking) {
+                        _voiceState.value = VoiceState.LISTENING
+                    }
                 }
 
-                // If mic is locked ON, never cancel the lock on silence or busy
-                val retryDelay = when (error) {
-                    SpeechRecognizer.ERROR_NO_MATCH,
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 400L
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 800L
-                    SpeechRecognizer.ERROR_CLIENT -> 450L
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
-                        _isMicLockedOn.value = false
+                override fun onBeginningOfSpeech() {
+                    if (_isMicLockedOn.value) {
+                        _voiceState.value = VoiceState.HEARING
+                    }
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+
+                override fun onError(error: Int) {
+                    if (!_isMicLockedOn.value) {
+                        _voiceState.value = VoiceState.IDLE
                         WakeWordForegroundService.resume(context)
-                        activeOnError?.invoke("Microphone permission required.")
                         return
                     }
-                    else -> 1000L
+
+                    // Keep mic locked ON on timeout/no-match/busy
+                    val retryDelay = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH,
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 350L
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 650L
+                        SpeechRecognizer.ERROR_CLIENT -> 400L
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
+                            _isMicLockedOn.value = false
+                            _voiceState.value = VoiceState.ERROR
+                            WakeWordForegroundService.resume(context)
+                            activeOnError?.invoke("Microphone permission required.")
+                            return
+                        }
+                        else -> 800L
+                    }
+
+                    mainHandler.post {
+                        destroyRecognizerInternal()
+                        if (_isMicLockedOn.value && !isTtsSpeaking) {
+                            _voiceState.value = VoiceState.LISTENING
+                            mainHandler.removeCallbacks(restartListeningRunnable)
+                            mainHandler.postDelayed(restartListeningRunnable, retryDelay)
+                        }
+                    }
                 }
 
-                mainHandler.post {
-                    destroyRecognizerInternal()
-                    mainHandler.removeCallbacks(restartListeningRunnable)
-                    mainHandler.postDelayed(restartListeningRunnable, retryDelay)
+                override fun onResults(results: Bundle?) {
+                    val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                        .orEmpty()
+                        .trim()
+
+                    if (text.isNotBlank()) {
+                        activeOnFinal?.invoke(text)
+                    }
+
+                    // If Mic is locked ON, restart listening
+                    if (_isMicLockedOn.value) {
+                        mainHandler.removeCallbacks(restartListeningRunnable)
+                        // If TTS has NOT started speaking (e.g. action or offline or delay), restart listening
+                        mainHandler.postDelayed({
+                            if (_isMicLockedOn.value && !isTtsSpeaking) {
+                                startListeningInternal()
+                            }
+                        }, 400L)
+                    }
                 }
+
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                        .orEmpty()
+                    if (text.isNotBlank()) {
+                        _voiceState.value = VoiceState.HEARING
+                        activeOnPartial?.invoke(text)
+                    }
+                }
+
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, activeLanguageTag)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
             }
 
-            override fun onResults(results: Bundle?) {
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
-                    .orEmpty()
-
-                if (text.isNotBlank()) {
-                    activeOnFinal?.invoke(text)
-                } else if (_isMicLockedOn.value) {
-                    // Empty speech, keep listening open
-                    mainHandler.removeCallbacks(restartListeningRunnable)
-                    mainHandler.postDelayed(restartListeningRunnable, 400L)
-                }
+            recognizer = sr
+            try {
+                sr.startListening(intent)
+            } catch (_: Exception) {
+                mainHandler.postDelayed(restartListeningRunnable, 600L)
             }
-
-            override fun onPartialResults(partialResults: Bundle?) {
-                val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
-                    .orEmpty()
-                if (text.isNotBlank()) {
-                    activeOnPartial?.invoke(text)
-                }
-            }
-
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-
-        val shouldPreferOffline = activePreferOffline || !isNetworkAvailable()
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, activeLanguageTag)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, shouldPreferOffline)
-            putExtra("android.speech.extra.DICTATION_MODE", true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
+    }
 
-        recognizer = sr
-        try {
-            sr.startListening(intent)
-        } catch (_: Exception) {
-            mainHandler.postDelayed(restartListeningRunnable, 800L)
+    fun requestRestartListening(delayMs: Long = 200L) {
+        if (_isMicLockedOn.value && !isTtsSpeaking) {
+            mainHandler.removeCallbacks(restartListeningRunnable)
+            mainHandler.postDelayed(restartListeningRunnable, delayMs)
         }
     }
 
@@ -258,6 +372,7 @@ class NativeVoiceController(
 
     fun stopListening() {
         _isMicLockedOn.value = false
+        _voiceState.value = VoiceState.IDLE
         mainHandler.removeCallbacks(restartListeningRunnable)
         mainHandler.post {
             destroyRecognizerInternal()

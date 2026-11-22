@@ -62,6 +62,9 @@ interface ZeeDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDraft(draft: OfflineDraftEntity)
+
+    @Query("DELETE FROM offline_drafts WHERE id = :id")
+    suspend fun deleteDraft(id: String)
 }
 
 @Database(

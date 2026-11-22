@@ -75,30 +75,10 @@ class OfflineModelStoreManager(private val context: Context) {
     // Verified 100% public, un-gated HTTP 200 MediaPipe-compatible .task & .bin models (Zero Token Required)
     val catalog: List<OfflineModelSpec> = listOf(
         OfflineModelSpec(
-            id = "gemma-2b-gpu-int4",
-            name = "Google Gemma 2B (MediaPipe Hardware INT4 GPU)",
-            type = OfflineModelType.LLM,
-            language = "Multilingual (EN / BN / HI) • GPU Accelerated",
-            approxSizeMb = 1292,
-            minRamGb = 4,
-            fileName = "gemma-2b-it-gpu-int4.bin",
-            downloadUrl = "https://huggingface.co/autoocrat0413/gemma-2b-it-gpu-int4-mediapipe/resolve/main/gemma-2b-it-gpu-int4.bin"
-        ),
-        OfflineModelSpec(
-            id = "gemma-2b-cpu-int4",
-            name = "Google Gemma 2B (MediaPipe INT4 CPU Lightweight)",
-            type = OfflineModelType.LLM,
-            language = "Multilingual • High-Speed CPU Inference",
-            approxSizeMb = 1284,
-            minRamGb = 3,
-            fileName = "gemma-2b-it-cpu-int4.bin",
-            downloadUrl = "https://huggingface.co/autoocrat0413/gemma-2b-it-gpu-int4-mediapipe/resolve/main/gemma-2b-it-cpu-int4.bin"
-        ),
-        OfflineModelSpec(
             id = "gemma-3n-e2b-task",
             name = "Google Gemma 3n E2B (MediaPipe Official .task)",
             type = OfflineModelType.LLM,
-            language = "Next-Gen Mobile Intelligence",
+            language = "Latest Mobile Multi-turn AI • Smart Voice & Actions",
             approxSizeMb = 2991,
             minRamGb = 6,
             fileName = "gemma-3n-E2B-it-int4.task",
@@ -108,7 +88,7 @@ class OfflineModelStoreManager(private val context: Context) {
             id = "gemma2-2b-cpu-int8",
             name = "Google Gemma 2 2B Instruct (.task CPU INT8)",
             type = OfflineModelType.LLM,
-            language = "High-Precision Reasoning & Logic",
+            language = "High-Precision Reasoning & Logic • Multilingual",
             approxSizeMb = 3054,
             minRamGb = 6,
             fileName = "gemma2-2b-it-cpu-int8.task",
@@ -118,31 +98,41 @@ class OfflineModelStoreManager(private val context: Context) {
             id = "gemma2-2b-gpu-int8",
             name = "Google Gemma 2 2B Instruct (.bin GPU INT8)",
             type = OfflineModelType.LLM,
-            language = "Creative Writing & High IQ Generation",
+            language = "High-IQ Creative Dialogue & Voice Conversation",
             approxSizeMb = 2505,
             minRamGb = 6,
             fileName = "gemma2-2b-it-gpu-int8.bin",
             downloadUrl = "https://huggingface.co/CarlosJefte/Gemma-2-2b-mediapipe/resolve/main/gemma2-2b-it-gpu-int8.bin"
         ),
         OfflineModelSpec(
+            id = "gemma-2b-gpu-int4",
+            name = "Google Gemma 2B (MediaPipe Hardware INT4 GPU)",
+            type = OfflineModelType.LLM,
+            language = "Multilingual (EN / BN / HI) • GPU Accelerated Phone Control",
+            approxSizeMb = 1292,
+            minRamGb = 4,
+            fileName = "gemma-2b-it-gpu-int4.bin",
+            downloadUrl = "https://huggingface.co/autoocrat0413/gemma-2b-it-gpu-int4-mediapipe/resolve/main/gemma-2b-it-gpu-int4.bin"
+        ),
+        OfflineModelSpec(
+            id = "gemma-2b-cpu-int4",
+            name = "Google Gemma 2B (MediaPipe INT4 CPU Lightweight)",
+            type = OfflineModelType.LLM,
+            language = "Ultra-Fast Offline Voice Commands & Instant Response",
+            approxSizeMb = 1284,
+            minRamGb = 3,
+            fileName = "gemma-2b-it-cpu-int4.bin",
+            downloadUrl = "https://huggingface.co/autoocrat0413/gemma-2b-it-gpu-int4-mediapipe/resolve/main/gemma-2b-it-cpu-int4.bin"
+        ),
+        OfflineModelSpec(
             id = "phi2-cpu-bin",
             name = "Microsoft Phi-2 2.7B (MediaPipe CPU .bin)",
             type = OfflineModelType.LLM,
-            language = "Deep Reasoning & Step-by-Step Logic",
+            language = "Step-by-Step Logic, Math & System Execution",
             approxSizeMb = 2658,
             minRamGb = 6,
             fileName = "phi2_cpu.bin",
             downloadUrl = "https://huggingface.co/siddhantchalke/phi2-cpu-mediapipe-llm-inference/resolve/main/phi2_cpu.bin"
-        ),
-        OfflineModelSpec(
-            id = "gemma-1.1-2b-cpu-int4",
-            name = "Google Gemma 1.1 2B Instruct (Ultra-Stable CPU)",
-            type = OfflineModelType.LLM,
-            language = "Everyday Chat & Instant Response",
-            approxSizeMb = 1284,
-            minRamGb = 4,
-            fileName = "gemma-1.1-2b-it-cpu-int4.bin",
-            downloadUrl = "https://huggingface.co/innermost47/gemma-2b-it-int4-mediapipe/resolve/main/gemma-1.1-2b-it-cpu-int4.bin"
         )
     )
 

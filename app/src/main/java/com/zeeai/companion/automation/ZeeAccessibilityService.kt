@@ -71,11 +71,18 @@ class ZeeAccessibilityService : AccessibilityService() {
     }
 
     fun navigate(actionName: String): Boolean {
-        return when (actionName.lowercase()) {
+        return when (actionName.lowercase().trim()) {
             "back" -> performGlobalAction(GLOBAL_ACTION_BACK)
             "home" -> performGlobalAction(GLOBAL_ACTION_HOME)
             "recents" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
             "notifications" -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+            "quick_settings", "quicksettings" -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
+            "lock" -> if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+            } else false
+            "screenshot" -> if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)
+            } else false
             else -> false
         }
     }
