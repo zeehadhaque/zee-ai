@@ -132,31 +132,34 @@ fun AICouncilScreen(
         }
 
         val geminiKey = keyVault.getKey("gemini_api_key")
-        val proModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" }
+        val backupGroq = keyVault.getKey("groq_api_key")
         val flashModel = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
+        val secondModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-flash-lite" }
 
         val tasks = mutableListOf<Triple<String, String, suspend () -> Result<String>>>()
 
-        if (useHydrogen && geminiKey.isNotBlank()) {
+        if (useHydrogen && (geminiKey.isNotBlank() || backupGroq.isNotBlank())) {
             tasks.add(
                 Triple(flashModel, "$flashModel • Fast Pragmatist") {
                     geminiClient.generateOnce(
                         apiKey = geminiKey,
                         model = flashModel,
                         systemInstruction = "Give a crisp, practical, directly actionable answer.",
-                        userPrompt = question
+                        userPrompt = question,
+                        backupGroqKey = backupGroq
                     )
                 }
             )
         }
-        if (useCarbon && geminiKey.isNotBlank()) {
+        if (useCarbon && (geminiKey.isNotBlank() || backupGroq.isNotBlank())) {
             tasks.add(
-                Triple(proModel, "$proModel • Flagship Strategist") {
+                Triple(secondModel, "$secondModel • Creative Strategist") {
                     geminiClient.generateOnce(
                         apiKey = geminiKey,
-                        model = proModel,
+                        model = secondModel,
                         systemInstruction = "Give a deeply reasoned, critical, edge-case-aware strategic analysis.",
-                        userPrompt = question
+                        userPrompt = question,
+                        backupGroqKey = backupGroq
                     )
                 }
             )
@@ -260,8 +263,9 @@ fun AICouncilScreen(
 
         synthesizing = true
         verdictText = ""
-        val proModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" }
-        statusText = "Synthesizing comparison & final verdict with $proModel..."
+        val activeModel = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
+        val backupGroq = keyVault.getKey("groq_api_key")
+        statusText = "Synthesizing comparison & final verdict with $activeModel..."
 
         val comparisonPayload = successful.mapIndexed { i, m ->
             "### Model ${i + 1}: ${m.displayName} (${m.roleTag}, ${m.latencyMs} ms)\n${m.text}"
@@ -270,10 +274,11 @@ fun AICouncilScreen(
         scope.launch {
             val res = geminiClient.streamChat(
                 apiKey = geminiKey,
-                model = proModel,
+                model = activeModel,
                 systemInstruction = "You are the Chair of ZEE AI Council. Output: 1) Strength & Weakness comparison per model, 2) Best Individual Answer (with why), and 3) Unified Combined Final Answer taking the strongest insights from all models.",
                 history = emptyList(),
                 userPrompt = "Original Question: \"${prompt.trim()}\"\n\nResponses:\n$comparisonPayload",
+                backupGroqKey = backupGroq,
                 onChunk = { partial ->
                     scope.launch(Dispatchers.Main) { verdictText = partial }
                 }

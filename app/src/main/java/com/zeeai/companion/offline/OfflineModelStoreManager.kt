@@ -1,7 +1,11 @@
 package com.zeeai.companion.offline
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -11,15 +15,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 enum class OfflineModelType {
     LLM,
     STT,
-    TTS,
-    WAKE_WORD
+    TTS
 }
 
 data class OfflineModelSpec(
@@ -50,133 +55,94 @@ class OfflineModelStoreManager(private val context: Context) {
         if (!exists()) mkdirs()
     }
 
+    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    init {
+        createNotificationChannel()
+    }
+
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS) // No read timeout for multi-GB model weights
+        .writeTimeout(0, TimeUnit.MILLISECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val activeJobs = mutableMapOf<String, Job>()
 
-    // Verified active, direct Hugging Face & Edge model URLs (Free & Zero-Gate direct downloads)
+    // Verified 100% public, un-gated HTTP 200 MediaPipe-compatible .task & .bin models (Zero Token Required)
     val catalog: List<OfflineModelSpec> = listOf(
-        // Google Gemma Family
         OfflineModelSpec(
-            id = "gemma-2-2b-it-gguf",
-            name = "Google Gemma 2 2B Instruct (Flagship Local)",
+            id = "gemma-2b-gpu-int4",
+            name = "Google Gemma 2B (MediaPipe Hardware INT4 GPU)",
             type = OfflineModelType.LLM,
-            language = "Multilingual (EN / BN / HI / UR)",
-            approxSizeMb = 1630,
+            language = "Multilingual (EN / BN / HI) • GPU Accelerated",
+            approxSizeMb = 1292,
             minRamGb = 4,
-            fileName = "gemma-2-2b-it-Q4_K_M.gguf",
-            downloadUrl = "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf"
-        ),
-        OfflineModelSpec(
-            id = "gemma-2-2b-fast-iq3",
-            name = "Google Gemma 2 2B (Ultra-Fast Mobile IQ3)",
-            type = OfflineModelType.LLM,
-            language = "Multilingual (Lightweight)",
-            approxSizeMb = 1250,
-            minRamGb = 3,
-            fileName = "gemma-2-2b-it-IQ3_M.gguf",
-            downloadUrl = "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-IQ3_M.gguf"
-        ),
-        OfflineModelSpec(
-            id = "gemma-2b-int4-task",
-            name = "Google Gemma 2B (MediaPipe Hardware INT4)",
-            type = OfflineModelType.LLM,
-            language = "Native MediaPipe GPU Engine",
-            approxSizeMb = 1350,
-            minRamGb = 6,
             fileName = "gemma-2b-it-gpu-int4.bin",
-            downloadUrl = "https://huggingface.co/google/gemma-2b-it-tflite/resolve/main/gemma-2b-it-gpu-int4.bin"
-        ),
-
-        // Multilingual & Bengali Specialists (Qwen 2.5)
-        OfflineModelSpec(
-            id = "qwen2.5-0.5b-gguf",
-            name = "Qwen 2.5 0.5B Instruct (Ultra-Fast Bengali/Eng)",
-            type = OfflineModelType.LLM,
-            language = "Bangla / English / Hindi / Urdu",
-            approxSizeMb = 398,
-            minRamGb = 2,
-            fileName = "qwen2.5-0.5b-instruct-q4_k_m.gguf",
-            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+            downloadUrl = "https://huggingface.co/autoocrat0413/gemma-2b-it-gpu-int4-mediapipe/resolve/main/gemma-2b-it-gpu-int4.bin"
         ),
         OfflineModelSpec(
-            id = "qwen2.5-1.5b-gguf",
-            name = "Qwen 2.5 1.5B Instruct (High-IQ Creative)",
+            id = "gemma-2b-cpu-int4",
+            name = "Google Gemma 2B (MediaPipe INT4 CPU Lightweight)",
             type = OfflineModelType.LLM,
-            language = "Multilingual + Poetry / Shayeri / Jokes",
-            approxSizeMb = 980,
-            minRamGb = 4,
-            fileName = "qwen2.5-1.5b-instruct-q4_k_m.gguf",
-            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
-        ),
-        OfflineModelSpec(
-            id = "qwen2.5-coder-1.5b-gguf",
-            name = "Qwen 2.5 Coder 1.5B (Offline Code Specialist)",
-            type = OfflineModelType.LLM,
-            language = "Kotlin / Python / Web / Android",
-            approxSizeMb = 980,
-            minRamGb = 4,
-            fileName = "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
-        ),
-
-        // Compact Mobile & Edge Giants
-        OfflineModelSpec(
-            id = "llama-3.2-1b-gguf",
-            name = "Meta Llama 3.2 1B Instruct (Mobile Optimized)",
-            type = OfflineModelType.LLM,
-            language = "English & Conversational General",
-            approxSizeMb = 800,
+            language = "Multilingual • High-Speed CPU Inference",
+            approxSizeMb = 1284,
             minRamGb = 3,
-            fileName = "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-            downloadUrl = "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+            fileName = "gemma-2b-it-cpu-int4.bin",
+            downloadUrl = "https://huggingface.co/autoocrat0413/gemma-2b-it-gpu-int4-mediapipe/resolve/main/gemma-2b-it-cpu-int4.bin"
         ),
         OfflineModelSpec(
-            id = "phi-3-mini-gguf",
-            name = "Microsoft Phi-3 Mini 4K (Deep Reasoning)",
+            id = "gemma-3n-e2b-task",
+            name = "Google Gemma 3n E2B (MediaPipe Official .task)",
             type = OfflineModelType.LLM,
-            language = "Logic / Math / Reasoning",
-            approxSizeMb = 2200,
+            language = "Next-Gen Mobile Intelligence",
+            approxSizeMb = 2991,
             minRamGb = 6,
-            fileName = "Phi-3-mini-4k-instruct-q4.gguf",
-            downloadUrl = "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf"
+            fileName = "gemma-3n-E2B-it-int4.task",
+            downloadUrl = "https://huggingface.co/abhianand1093/llminferencedemo/resolve/main/gemma-3n-E2B-it-int4.task"
         ),
         OfflineModelSpec(
-            id = "tinyllama-1.1b-gguf",
-            name = "TinyLlama 1.1B Chat (Zero-Lag Ultra-Light)",
+            id = "gemma2-2b-cpu-int8",
+            name = "Google Gemma 2 2B Instruct (.task CPU INT8)",
             type = OfflineModelType.LLM,
-            language = "Lightweight Casual Chat",
-            approxSizeMb = 669,
-            minRamGb = 2,
-            fileName = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
-            downloadUrl = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
-        ),
-
-        // Offline Neural Audio & Speech
-        OfflineModelSpec(
-            id = "kokoro-82m-voice",
-            name = "Kokoro 82M Neural Voice (Offline TTS Engine)",
-            type = OfflineModelType.TTS,
-            language = "Hyper-Realistic Voice Synthesis",
-            approxSizeMb = 147,
-            minRamGb = 2,
-            fileName = "model_q4f16.onnx",
-            downloadUrl = "https://huggingface.co/onnx-community/Kokoro-82M-ONNX/resolve/main/onnx/model_q4f16.onnx"
+            language = "High-Precision Reasoning & Logic",
+            approxSizeMb = 3054,
+            minRamGb = 6,
+            fileName = "gemma2-2b-it-cpu-int8.task",
+            downloadUrl = "https://huggingface.co/CarlosJefte/Gemma-2-2b-mediapipe/resolve/main/gemma2-2b-it-cpu-int8.task"
         ),
         OfflineModelSpec(
-            id = "whisper-tiny-stt",
-            name = "Whisper Tiny (Offline Speech-to-Text STT)",
-            type = OfflineModelType.STT,
-            language = "Multilingual Real-time Speech",
-            approxSizeMb = 75,
-            minRamGb = 2,
-            fileName = "ggml-tiny.bin",
-            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+            id = "gemma2-2b-gpu-int8",
+            name = "Google Gemma 2 2B Instruct (.bin GPU INT8)",
+            type = OfflineModelType.LLM,
+            language = "Creative Writing & High IQ Generation",
+            approxSizeMb = 2505,
+            minRamGb = 6,
+            fileName = "gemma2-2b-it-gpu-int8.bin",
+            downloadUrl = "https://huggingface.co/CarlosJefte/Gemma-2-2b-mediapipe/resolve/main/gemma2-2b-it-gpu-int8.bin"
+        ),
+        OfflineModelSpec(
+            id = "phi2-cpu-bin",
+            name = "Microsoft Phi-2 2.7B (MediaPipe CPU .bin)",
+            type = OfflineModelType.LLM,
+            language = "Deep Reasoning & Step-by-Step Logic",
+            approxSizeMb = 2658,
+            minRamGb = 6,
+            fileName = "phi2_cpu.bin",
+            downloadUrl = "https://huggingface.co/siddhantchalke/phi2-cpu-mediapipe-llm-inference/resolve/main/phi2_cpu.bin"
+        ),
+        OfflineModelSpec(
+            id = "gemma-1.1-2b-cpu-int4",
+            name = "Google Gemma 1.1 2B Instruct (Ultra-Stable CPU)",
+            type = OfflineModelType.LLM,
+            language = "Everyday Chat & Instant Response",
+            approxSizeMb = 1284,
+            minRamGb = 4,
+            fileName = "gemma-1.1-2b-it-cpu-int4.bin",
+            downloadUrl = "https://huggingface.co/innermost47/gemma-2b-it-int4-mediapipe/resolve/main/gemma-1.1-2b-it-cpu-int4.bin"
         )
     )
 
@@ -187,7 +153,7 @@ class OfflineModelStoreManager(private val context: Context) {
         val spec = catalog.find { it.id == modelId }
         val fileName = spec?.fileName ?: modelId
         val file = File(modelsDir, fileName)
-        return if (file.exists() && file.length() > 0L) file else null
+        return if (file.exists() && file.length() > 20_000_000L) file else null
     }
 
     fun getTotalStorageUsedBytes(): Long {
@@ -214,7 +180,11 @@ class OfflineModelStoreManager(private val context: Context) {
             )
         }
 
+        val notificationId = 8800 + modelId.hashCode().coerceAtLeast(0) % 1000
+
         try {
+            showDownloadNotification(notificationId, spec.name, 0, false)
+
             val reqBuilder = Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0 (Android; Mobile; ZEE-AI)")
@@ -228,14 +198,15 @@ class OfflineModelStoreManager(private val context: Context) {
                 if (!response.isSuccessful) {
                     val code = response.code
                     val msg = when (code) {
-                        401, 403 -> "HTTP $code: Gated model. Enter Hugging Face Access Token in Settings."
+                        401, 403 -> "HTTP $code: Gated model — enter access token or choose un-gated model."
                         404 -> "HTTP 404: Model file not found on host."
+                        429 -> "HTTP 429: Host rate limit reached. Please wait a minute."
                         else -> "HTTP $code: Server error (${response.message})"
                     }
                     throw IllegalStateException(msg)
                 }
 
-                val body = response.body ?: throw IllegalStateException("Empty response body from server.")
+                val body = response.body ?: throw IllegalStateException("Empty response body from host.")
                 val totalBytes = body.contentLength()
 
                 body.byteStream().use { input ->
@@ -243,6 +214,7 @@ class OfflineModelStoreManager(private val context: Context) {
                         val buffer = ByteArray(64 * 1024)
                         var downloaded = 0L
                         var lastReportedPct = -1
+                        var lastNotifTime = 0L
 
                         while (true) {
                             val read = input.read(buffer)
@@ -250,30 +222,53 @@ class OfflineModelStoreManager(private val context: Context) {
                             output.write(buffer, 0, read)
                             downloaded += read
 
-                            if (totalBytes > 0L) {
-                                val pct = ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
-                                if (pct != lastReportedPct) {
-                                    lastReportedPct = pct
-                                    updateItem(modelId) {
-                                        it.copy(
-                                            progressPercent = pct,
-                                            downloadedBytes = downloaded,
-                                            totalBytes = totalBytes
-                                        )
-                                    }
-                                }
+                            val pct = if (totalBytes > 0L) {
+                                ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
                             } else {
+                                0
+                            }
+
+                            if (pct != lastReportedPct) {
+                                lastReportedPct = pct
                                 updateItem(modelId) {
                                     it.copy(
+                                        progressPercent = pct,
                                         downloadedBytes = downloaded,
                                         totalBytes = totalBytes
                                     )
                                 }
                             }
+
+                            val now = System.currentTimeMillis()
+                            if (now - lastNotifTime > 1500L) {
+                                lastNotifTime = now
+                                val mbDone = (downloaded / (1024 * 1024)).toInt()
+                                val mbTotal = (totalBytes / (1024 * 1024)).toInt()
+                                showDownloadNotification(
+                                    notificationId,
+                                    "${spec.name} ($pct%) • $mbDone / $mbTotal MB",
+                                    pct,
+                                    false
+                                )
+                            }
                         }
                         output.flush()
                     }
                 }
+            }
+
+            // Verify downloaded file integrity: size > 20 MB and non-HTML
+            if (tempFile.length() < 20_000_000L) {
+                tempFile.delete()
+                throw IllegalStateException("Downloaded file is smaller than expected (< 20MB). Network dropped.")
+            }
+
+            val headerBytes = ByteArray(20)
+            FileInputStream(tempFile).use { it.read(headerBytes) }
+            val headerString = String(headerBytes).lowercase()
+            if (headerString.contains("<html") || headerString.contains("<!doc") || headerString.contains("<error")) {
+                tempFile.delete()
+                throw IllegalStateException("Received HTML error page instead of binary model bundle.")
             }
 
             if (targetFile.exists()) targetFile.delete()
@@ -292,24 +287,84 @@ class OfflineModelStoreManager(private val context: Context) {
                     error = null
                 )
             }
+            showDownloadNotification(notificationId, "✅ ${spec.name} Ready for Offline Use", 100, true)
         } catch (ce: CancellationException) {
             tempFile.delete()
+            cancelNotification(notificationId)
             updateItem(modelId) {
                 it.copy(isDownloading = false, progressPercent = 0, error = "Download cancelled.")
             }
             throw ce
         } catch (e: Exception) {
             tempFile.delete()
+            cancelNotification(notificationId)
+            val cleanErr = e.message ?: "Download connection error"
             updateItem(modelId) {
                 it.copy(
                     isDownloading = false,
                     progressPercent = 0,
-                    error = e.message ?: "Download connection error"
+                    error = cleanErr
                 )
             }
         } finally {
             activeJobs.remove(modelId)
         }
+    }
+
+    suspend fun verifyHuggingFaceToken(token: String): Result<String> = withContext(Dispatchers.IO) {
+        val clean = token.trim()
+        if (clean.isBlank()) return@withContext Result.failure(IllegalArgumentException("Token is blank."))
+        val req = Request.Builder()
+            .url("https://huggingface.co/api/whoami-v2")
+            .header("Authorization", "Bearer $clean")
+            .header("User-Agent", "Mozilla/5.0 (Android; Mobile; ZEE-AI)")
+            .get()
+            .build()
+        try {
+            httpClient.newCall(req).execute().use { resp ->
+                val raw = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    val code = resp.code
+                    val msg = if (code == 401) "Invalid or expired Hugging Face token" else "HTTP $code error"
+                    return@withContext Result.failure(IllegalStateException(msg))
+                }
+                val json = JSONObject(raw)
+                val username = json.optString("name", "Verified User")
+                Result.success(username)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "ZEE AI Model Downloads",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows progress for on-device AI model downloads."
+                setShowBadge(false)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showDownloadNotification(id: Int, text: String, progress: Int, done: Boolean) {
+        val notif = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setContentTitle("ZEE AI Local Model")
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setOngoing(!done)
+            .setAutoCancel(done)
+            .setProgress(100, progress, progress == 0 && !done)
+            .build()
+        notificationManager.notify(id, notif)
+    }
+
+    private fun cancelNotification(id: Int) {
+        notificationManager.cancel(id)
     }
 
     fun importLocalModelFile(sourceUri: Uri, fileName: String): Boolean {
@@ -348,7 +403,7 @@ class OfflineModelStoreManager(private val context: Context) {
     private fun buildSnapshot(): List<ModelDownloadState> {
         return catalog.map { spec ->
             val file = File(modelsDir, spec.fileName)
-            val exists = file.exists() && file.length() > 0L
+            val exists = file.exists() && file.length() > 20_000_000L
             ModelDownloadState(
                 spec = spec,
                 installed = exists,
@@ -364,5 +419,9 @@ class OfflineModelStoreManager(private val context: Context) {
         _modelsState.value = _modelsState.value.map { item ->
             if (item.spec.id == modelId) transform(item) else item
         }
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "zee_ai_downloads"
     }
 }

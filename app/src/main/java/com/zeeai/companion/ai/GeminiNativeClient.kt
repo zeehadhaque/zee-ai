@@ -53,12 +53,23 @@ data class ModelDiscoveryResult(
 
 class GeminiNativeClient {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
+        .writeTimeout(90, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 
     @Volatile
     private var activeCall: Call? = null
+
+    // Ordered high-quota Free-Tier Flash models
+    private val standardFlashPriority = listOf(
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite"
+    )
 
     fun cancelActive() {
         activeCall?.cancel()
@@ -112,21 +123,161 @@ class GeminiNativeClient {
                     return@withContext Result.failure(IllegalStateException("No content generation models found for this API key."))
                 }
 
-                // Auto-select best Pro and Flash models
+                // Prioritize high-quota Free-Tier Flash models FIRST
+                val flashCandidates = discoveredList.filter { it.id.contains("flash", ignoreCase = true) }
+                val bestFlash = flashCandidates.firstOrNull { it.id.contains("2.5-flash", ignoreCase = true) && !it.id.contains("lite") }?.id
+                    ?: flashCandidates.firstOrNull { it.id.contains("2.5-flash-lite", ignoreCase = true) }?.id
+                    ?: flashCandidates.firstOrNull { it.id.contains("2.0-flash", ignoreCase = true) }?.id
+                    ?: flashCandidates.firstOrNull()?.id
+                    ?: "gemini-2.5-flash"
+
                 val proCandidates = discoveredList.filter { it.id.contains("pro", ignoreCase = true) }
                 val bestPro = proCandidates.firstOrNull { it.id.contains("2.5", ignoreCase = true) }?.id
                     ?: proCandidates.firstOrNull { it.id.contains("2.0", ignoreCase = true) }?.id
                     ?: proCandidates.firstOrNull()?.id
-                    ?: discoveredList.firstOrNull { !it.id.contains("flash", ignoreCase = true) }?.id
-                    ?: discoveredList.first().id
-
-                val flashCandidates = discoveredList.filter { it.id.contains("flash", ignoreCase = true) }
-                val bestFlash = flashCandidates.firstOrNull { it.id.contains("2.5", ignoreCase = true) }?.id
-                    ?: flashCandidates.firstOrNull { it.id.contains("2.0", ignoreCase = true) }?.id
-                    ?: flashCandidates.firstOrNull()?.id
-                    ?: discoveredList.first().id
+                    ?: bestFlash
 
                 Result.success(ModelDiscoveryResult(discoveredList, bestFlash, bestPro))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun testAiConnection(
+        geminiKey: String,
+        groqKey: String = "",
+        openRouterKey: String = ""
+    ): String = withContext(Dispatchers.IO) {
+        if (geminiKey.isNotBlank()) {
+            val testUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey.trim()}"
+            val testBody = JSONObject().apply {
+                put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "hi")))))
+                put("generationConfig", JSONObject().put("maxOutputTokens", 5))
+            }
+            try {
+                val req = Request.Builder().url(testUrl).post(testBody.toString().toRequestBody("application/json".toMediaType())).build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        return@withContext "✅ Gemini Connected: gemini-2.5-flash (Online & Active)"
+                    } else if (resp.code == 429) {
+                        // Test backup providers
+                        if (groqKey.isNotBlank()) {
+                            val groqOk = testGroq(groqKey)
+                            if (groqOk) return@withContext "⚠️ Gemini Quota Exhausted (429) • Groq Backup Connected (llama-3.3-70b)"
+                        }
+                        if (openRouterKey.isNotBlank()) {
+                            val orOk = testOpenRouter(openRouterKey)
+                            if (orOk) return@withContext "⚠️ Gemini Quota Exhausted (429) • OpenRouter Backup Connected"
+                        }
+                        return@withContext "⚠️ Gemini API Quota Exhausted (HTTP 429) — Get a new key at aistudio.google.com or add a free Groq key."
+                    } else {
+                        return@withContext "❌ Gemini Error (${resp.code}): ${resp.body?.string()?.take(100)}"
+                    }
+                }
+            } catch (e: Exception) {
+                return@withContext "❌ Connection failed: ${e.message?.take(80)}"
+            }
+        } else if (groqKey.isNotBlank()) {
+            if (testGroq(groqKey)) return@withContext "✅ Groq Backup Connected (llama-3.3-70b-versatile)"
+            return@withContext "❌ Groq key test failed."
+        } else if (openRouterKey.isNotBlank()) {
+            if (testOpenRouter(openRouterKey)) return@withContext "✅ OpenRouter Backup Connected"
+            return@withContext "❌ OpenRouter key test failed."
+        }
+        "No API Key Configured"
+    }
+
+    private fun testGroq(key: String): Boolean {
+        return try {
+            val req = Request.Builder()
+                .url("https://api.groq.com/openai/v1/chat/completions")
+                .header("Authorization", "Bearer ${key.trim()}")
+                .post(
+                    JSONObject().apply {
+                        put("model", "llama-3.3-70b-versatile")
+                        put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "hi")))
+                        put("max_tokens", 5)
+                    }.toString().toRequestBody("application/json".toMediaType())
+                ).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    private fun testOpenRouter(key: String): Boolean {
+        return try {
+            val req = Request.Builder()
+                .url("https://openrouter.ai/api/v1/chat/completions")
+                .header("Authorization", "Bearer ${key.trim()}")
+                .header("HTTP-Referer", "https://github.com/zeehadhaque/zee-ai")
+                .header("X-Title", "ZEE AI")
+                .post(
+                    JSONObject().apply {
+                        put("model", "meta-llama/llama-3.3-70b-instruct:free")
+                        put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "hi")))
+                        put("max_tokens", 5)
+                    }.toString().toRequestBody("application/json".toMediaType())
+                ).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /**
+     * Executes OpenAI-compatible chat completion for Groq or OpenRouter
+     */
+    suspend fun executeOpenAiCompatibleChat(
+        endpointUrl: String,
+        apiKey: String,
+        model: String,
+        systemInstruction: String,
+        history: List<Pair<String, String>>,
+        userPrompt: String,
+        onChunk: (accumulatedText: String) -> Unit
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val messages = JSONArray()
+        if (systemInstruction.isNotBlank()) {
+            messages.put(JSONObject().put("role", "system").put("content", systemInstruction))
+        }
+        for ((role, text) in history.takeLast(10)) {
+            val mappedRole = if (role == "model" || role == "assistant") "assistant" else "user"
+            messages.put(JSONObject().put("role", mappedRole).put("content", text))
+        }
+        messages.put(JSONObject().put("role", "user").put("content", userPrompt))
+
+        val body = JSONObject().apply {
+            put("model", model)
+            put("messages", messages)
+            put("temperature", 0.7)
+            put("stream", false)
+        }
+
+        val reqBuilder = Request.Builder()
+            .url(endpointUrl)
+            .header("Authorization", "Bearer ${apiKey.trim()}")
+            .header("Content-Type", "application/json")
+
+        if (endpointUrl.contains("openrouter")) {
+            reqBuilder.header("HTTP-Referer", "https://github.com/zeehadhaque/zee-ai")
+            reqBuilder.header("X-Title", "ZEE AI Companion")
+        }
+
+        val request = reqBuilder.post(body.toString().toRequestBody("application/json".toMediaType())).build()
+
+        try {
+            client.newCall(request).execute().use { resp ->
+                val raw = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    return@withContext Result.failure(IllegalStateException("Backup provider error (${resp.code}): ${raw.take(160)}"))
+                }
+                val json = JSONObject(raw)
+                val reply = json.optJSONArray("choices")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("message")
+                    ?.optString("content", "")
+                    .orEmpty()
+                    .trim()
+                onChunk(reply)
+                Result.success(reply)
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -137,15 +288,91 @@ class GeminiNativeClient {
         apiKey: String,
         model: String = "gemini-2.5-flash",
         systemInstruction: String,
-        history: List<Pair<String, String>>, // Pair(role = "user"|"model", text)
+        history: List<Pair<String, String>>,
         userPrompt: String,
         enableGoogleSearch: Boolean = false,
+        backupGroqKey: String = "",
+        backupOpenRouterKey: String = "",
         onChunk: (accumulatedText: String) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) {
-            return@withContext Result.failure(IllegalStateException("Gemini API key not set."))
+        if (apiKey.isBlank() && backupGroqKey.isBlank() && backupOpenRouterKey.isBlank()) {
+            return@withContext Result.failure(IllegalStateException("No AI API key configured in Settings."))
         }
 
+        // Build fallback list starting with requested model then standard Flash cascade
+        val modelsToTry = mutableListOf<String>()
+        modelsToTry.add(model)
+        for (m in standardFlashPriority) {
+            if (!modelsToTry.contains(m)) modelsToTry.add(m)
+        }
+
+        var lastError: Throwable? = null
+
+        if (apiKey.isNotBlank()) {
+            for (candidateModel in modelsToTry) {
+                val res = streamChatSingleAttempt(
+                    apiKey = apiKey,
+                    model = candidateModel,
+                    systemInstruction = systemInstruction,
+                    history = history,
+                    userPrompt = userPrompt,
+                    enableGoogleSearch = enableGoogleSearch,
+                    onChunk = onChunk
+                )
+                if (res.isSuccess) {
+                    return@withContext res
+                }
+                val err = res.exceptionOrNull()
+                lastError = err
+                val msg = err?.message.orEmpty()
+                // Only fallback if quota exhausted (429) or model not found (404) or transient server overload (503)
+                val isRetryable = msg.contains("429") || msg.contains("404") || msg.contains("503") || msg.contains("RESOURCE_EXHAUSTED")
+                if (!isRetryable) {
+                    break
+                }
+            }
+        }
+
+        // Seamless Failover: Groq Backup
+        if (backupGroqKey.isNotBlank()) {
+            val groqRes = executeOpenAiCompatibleChat(
+                endpointUrl = "https://api.groq.com/openai/v1/chat/completions",
+                apiKey = backupGroqKey,
+                model = "llama-3.3-70b-versatile",
+                systemInstruction = systemInstruction,
+                history = history,
+                userPrompt = userPrompt,
+                onChunk = onChunk
+            )
+            if (groqRes.isSuccess) return@withContext groqRes
+        }
+
+        // Seamless Failover: OpenRouter Backup
+        if (backupOpenRouterKey.isNotBlank()) {
+            val openRouterRes = executeOpenAiCompatibleChat(
+                endpointUrl = "https://openrouter.ai/api/v1/chat/completions",
+                apiKey = backupOpenRouterKey,
+                model = "meta-llama/llama-3.3-70b-instruct:free",
+                systemInstruction = systemInstruction,
+                history = history,
+                userPrompt = userPrompt,
+                onChunk = onChunk
+            )
+            if (openRouterRes.isSuccess) return@withContext openRouterRes
+        }
+
+        Result.failure(lastError ?: IllegalStateException("Chat request failed."))
+    }
+
+    private suspend fun streamChatSingleAttempt(
+        apiKey: String,
+        model: String,
+        systemInstruction: String,
+        history: List<Pair<String, String>>,
+        userPrompt: String,
+        enableGoogleSearch: Boolean,
+        onChunk: (accumulatedText: String) -> Unit
+    ): Result<String> = withContext(Dispatchers.IO) {
         val contents = JSONArray()
         for ((role, text) in history.takeLast(12)) {
             contents.put(
@@ -189,7 +416,7 @@ class GeminiNativeClient {
             call.execute().use { response ->
                 if (!response.isSuccessful) {
                     val err = response.body?.string()?.take(250) ?: "HTTP ${response.code}"
-                    return@withContext Result.failure(IllegalStateException("Gemini error (${response.code}): $err"))
+                    return@withContext Result.failure(IllegalStateException("HTTP ${response.code}: $err"))
                 }
 
                 val stream = response.body?.byteStream()
@@ -233,15 +460,103 @@ class GeminiNativeClient {
 
     suspend fun streamGrounded(
         apiKey: String,
-        model: String = "gemini-2.5-pro",
+        model: String = "gemini-2.5-flash",
+        systemInstruction: String,
+        userPrompt: String,
+        backupGroqKey: String = "",
+        onChunk: (accumulatedText: String, citations: List<GroundedCitation>, queries: List<String>) -> Unit
+    ): Result<GroundedStreamResult> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            // If Gemini is blank but Groq backup is provided
+            if (backupGroqKey.isNotBlank()) {
+                var outputText = ""
+                val groqRes = executeOpenAiCompatibleChat(
+                    endpointUrl = "https://api.groq.com/openai/v1/chat/completions",
+                    apiKey = backupGroqKey,
+                    model = "llama-3.3-70b-versatile",
+                    systemInstruction = systemInstruction,
+                    history = emptyList(),
+                    userPrompt = userPrompt,
+                    onChunk = {
+                        outputText = it
+                        onChunk(it, emptyList(), emptyList())
+                    }
+                )
+                return@withContext groqRes.map {
+                    GroundedStreamResult(
+                        text = "$it\n\n> ℹ️ *Answered via Groq Llama-3.3-70B backup (Google Search Grounding requires Gemini)*",
+                        citations = emptyList(),
+                        searchQueries = emptyList()
+                    )
+                }
+            }
+            return@withContext Result.failure(IllegalStateException("Gemini API key not set in Settings."))
+        }
+
+        val modelsToTry = mutableListOf<String>()
+        modelsToTry.add(model)
+        for (m in standardFlashPriority) {
+            if (!modelsToTry.contains(m)) modelsToTry.add(m)
+        }
+
+        for (candidateModel in modelsToTry) {
+            val groundedRes = streamGroundedSingleAttempt(
+                apiKey = apiKey,
+                model = candidateModel,
+                systemInstruction = systemInstruction,
+                userPrompt = userPrompt,
+                onChunk = onChunk
+            )
+            if (groundedRes.isSuccess) {
+                return@withContext groundedRes
+            }
+            val err = groundedRes.exceptionOrNull()
+            val msg = err?.message.orEmpty()
+            if (!msg.contains("429") && !msg.contains("404") && !msg.contains("RESOURCE_EXHAUSTED")) {
+                break
+            }
+        }
+
+        // If Grounding failed with 429 across models, fall back gracefully to Flash without grounding
+        var ungroundedText = ""
+        val ungroundedRes = streamChat(
+            apiKey = apiKey,
+            model = "gemini-2.5-flash",
+            systemInstruction = systemInstruction,
+            history = emptyList(),
+            userPrompt = userPrompt,
+            enableGoogleSearch = false,
+            backupGroqKey = backupGroqKey,
+            onChunk = { partial ->
+                ungroundedText = partial
+                onChunk(partial, emptyList(), emptyList())
+            }
+        )
+
+        if (ungroundedRes.isSuccess) {
+            val cleanText = ungroundedRes.getOrNull().orEmpty()
+            val note = "\n\n> ℹ️ *Search quota reached — answered using Flash intelligence without live web citations.*"
+            val finalText = cleanText + note
+            onChunk(finalText, emptyList(), emptyList())
+            return@withContext Result.success(
+                GroundedStreamResult(
+                    text = finalText,
+                    citations = emptyList(),
+                    searchQueries = emptyList()
+                )
+            )
+        }
+
+        Result.failure(ungroundedRes.exceptionOrNull() ?: IllegalStateException("Research grounded search failed."))
+    }
+
+    private suspend fun streamGroundedSingleAttempt(
+        apiKey: String,
+        model: String,
         systemInstruction: String,
         userPrompt: String,
         onChunk: (accumulatedText: String, citations: List<GroundedCitation>, queries: List<String>) -> Unit
     ): Result<GroundedStreamResult> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) {
-            return@withContext Result.failure(IllegalStateException("Gemini API key not set in Settings."))
-        }
-
         val bodyJson = JSONObject().apply {
             put(
                 "systemInstruction",
@@ -255,8 +570,7 @@ class GeminiNativeClient {
                         .put("parts", JSONArray().put(JSONObject().put("text", userPrompt)))
                 )
             )
-            // temperature = 1.0 is recommended by Google for reliable Search Grounding dispatch
-            put("generationConfig", JSONObject().put("temperature", 1.0))
+            put("generationConfig", JSONObject().put("temperature", 0.7))
             put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
         }
 
@@ -276,7 +590,7 @@ class GeminiNativeClient {
                 if (!response.isSuccessful) {
                     val err = response.body?.string()?.take(260) ?: "HTTP ${response.code}"
                     return@withContext Result.failure(
-                        IllegalStateException("Gemini Grounding error (${response.code}): $err")
+                        IllegalStateException("HTTP ${response.code}: $err")
                     )
                 }
 
@@ -307,7 +621,6 @@ class GeminiNativeClient {
                                 }
                             }
 
-                            // Parse Google Search Grounding metadata (webSearchQueries + groundingChunks)
                             val meta = candidate.optJSONObject("groundingMetadata")
                             if (meta != null) {
                                 val queries = meta.optJSONArray("webSearchQueries")
@@ -351,20 +664,54 @@ class GeminiNativeClient {
         }
     }
 
-    /**
-     * Concurrency-safe single-shot request for AI Council parallel model execution.
-     */
     suspend fun generateOnce(
+        apiKey: String,
+        model: String = "gemini-2.5-flash",
+        systemInstruction: String,
+        userPrompt: String,
+        temperature: Double = 0.7,
+        backupGroqKey: String = ""
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val modelsToTry = mutableListOf<String>()
+        modelsToTry.add(model)
+        for (m in standardFlashPriority) {
+            if (!modelsToTry.contains(m)) modelsToTry.add(m)
+        }
+
+        if (apiKey.isNotBlank()) {
+            for (candidate in modelsToTry) {
+                val res = generateOnceSingleAttempt(apiKey, candidate, systemInstruction, userPrompt, temperature)
+                if (res.isSuccess) return@withContext res
+                val msg = res.exceptionOrNull()?.message.orEmpty()
+                if (!msg.contains("429") && !msg.contains("404") && !msg.contains("RESOURCE_EXHAUSTED")) {
+                    break
+                }
+            }
+        }
+
+        if (backupGroqKey.isNotBlank()) {
+            val groqRes = executeOpenAiCompatibleChat(
+                endpointUrl = "https://api.groq.com/openai/v1/chat/completions",
+                apiKey = backupGroqKey,
+                model = "llama-3.3-70b-versatile",
+                systemInstruction = systemInstruction,
+                history = emptyList(),
+                userPrompt = userPrompt,
+                onChunk = {}
+            )
+            if (groqRes.isSuccess) return@withContext groqRes
+        }
+
+        Result.failure(IllegalStateException("AI generation request failed across all models."))
+    }
+
+    private suspend fun generateOnceSingleAttempt(
         apiKey: String,
         model: String,
         systemInstruction: String,
         userPrompt: String,
-        temperature: Double = 0.7
+        temperature: Double
     ): Result<String> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) {
-            return@withContext Result.failure(IllegalStateException("Gemini API key not set."))
-        }
-
         val bodyJson = JSONObject().apply {
             put(
                 "systemInstruction",
@@ -509,61 +856,76 @@ class GeminiNativeClient {
             put("generationConfig", JSONObject().put("temperature", 0.4))
         }
 
-        val url =
-            "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse&key=${apiKey.trim()}"
+        val modelsToTry = mutableListOf<String>()
+        modelsToTry.add(model)
+        for (m in standardFlashPriority) {
+            if (!modelsToTry.contains(m)) modelsToTry.add(m)
+        }
 
-        val request = Request.Builder()
-            .url(url)
-            .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+        for (candidateModel in modelsToTry) {
+            val url =
+                "https://generativelanguage.googleapis.com/v1beta/models/$candidateModel:streamGenerateContent?alt=sse&key=${apiKey.trim()}"
 
-        val call = client.newCall(request)
-        activeCall = call
+            val request = Request.Builder()
+                .url(url)
+                .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
+                .build()
 
-        try {
-            call.execute().use { response ->
-                if (!response.isSuccessful) {
-                    val err = response.body?.string()?.take(260) ?: "HTTP ${response.code}"
-                    return@withContext Result.failure(IllegalStateException("Gemini error (${response.code}): $err"))
-                }
+            val call = client.newCall(request)
+            activeCall = call
 
-                val stream = response.body?.byteStream()
-                    ?: return@withContext Result.failure(IllegalStateException("Empty Gemini stream."))
+            try {
+                val res = call.execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val err = response.body?.string()?.take(260) ?: "HTTP ${response.code}"
+                        return@use Result.failure<String>(IllegalStateException("HTTP ${response.code}: $err"))
+                    }
 
-                val accumulated = StringBuilder()
-                BufferedReader(InputStreamReader(stream)).use { reader ->
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null && isActive) {
-                        val trimmed = line?.trim() ?: continue
-                        if (!trimmed.startsWith("data:")) continue
-                        val jsonStr = trimmed.removePrefix("data:").trim()
-                        if (jsonStr.isEmpty() || jsonStr == "[DONE]") continue
+                    val stream = response.body?.byteStream()
+                        ?: return@use Result.failure<String>(IllegalStateException("Empty Gemini stream."))
 
-                        runCatching {
-                            val obj = JSONObject(jsonStr)
-                            val respParts = obj.optJSONArray("candidates")
-                                ?.optJSONObject(0)
-                                ?.optJSONObject("content")
-                                ?.optJSONArray("parts")
-                            if (respParts != null) {
-                                for (i in 0 until respParts.length()) {
-                                    val piece = respParts.optJSONObject(i)?.optString("text", "") ?: ""
-                                    if (piece.isNotEmpty()) {
-                                        accumulated.append(piece)
-                                        onChunk(accumulated.toString())
+                    val accumulated = StringBuilder()
+                    BufferedReader(InputStreamReader(stream)).use { reader ->
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null && isActive) {
+                            val trimmed = line?.trim() ?: continue
+                            if (!trimmed.startsWith("data:")) continue
+                            val jsonStr = trimmed.removePrefix("data:").trim()
+                            if (jsonStr.isEmpty() || jsonStr == "[DONE]") continue
+
+                            runCatching {
+                                val obj = JSONObject(jsonStr)
+                                val respParts = obj.optJSONArray("candidates")
+                                    ?.optJSONObject(0)
+                                    ?.optJSONObject("content")
+                                    ?.optJSONArray("parts")
+                                if (respParts != null) {
+                                    for (i in 0 until respParts.length()) {
+                                        val piece = respParts.optJSONObject(i)?.optString("text", "") ?: ""
+                                        if (piece.isNotEmpty()) {
+                                            accumulated.append(piece)
+                                            onChunk(accumulated.toString())
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                    Result.success(accumulated.toString().trim())
                 }
-                Result.success(accumulated.toString().trim())
+                if (res.isSuccess) return@withContext res
+                val msg = res.exceptionOrNull()?.message.orEmpty()
+                if (!msg.contains("429") && !msg.contains("404") && !msg.contains("RESOURCE_EXHAUSTED")) {
+                    return@withContext res
+                }
+            } catch (e: Exception) {
+                return@withContext Result.failure(e)
+            } finally {
+                activeCall = null
             }
-        } catch (e: Exception) {
-            Result.failure(e)
-        } finally {
-            activeCall = null
         }
+
+        Result.failure(IllegalStateException("Multimodal generation failed."))
     }
 
     private suspend fun uploadUriToGeminiFilesApi(
@@ -607,7 +969,6 @@ class GeminiNativeClient {
         val fileUri = uploadedMeta.optString("uri")
         var state = uploadedMeta.optString("state", "ACTIVE")
 
-        // Video & large audio files process asynchronously on Gemini servers before becoming ACTIVE
         var attempts = 0
         while (state == "PROCESSING" && attempts < 30 && isActive) {
             onStatus("Processing media on Gemini servers (${attempts + 1}s)...")

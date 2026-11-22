@@ -328,9 +328,10 @@ fun FilmmakerStudioScreen(
 
         scope.launch {
             val apiKey = keyVault.getKey("gemini_api_key")
-            val proModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" }
+            val activeModel = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
+            val backupGroq = keyVault.getKey("groq_api_key")
 
-            if (isOnline() && apiKey.isNotBlank()) {
+            if (isOnline() && (apiKey.isNotBlank() || backupGroq.isNotBlank())) {
                 val result = if (faceReferenceUri != null) {
                     // Vision multimodal pass with attached face reference
                     val mime = context.contentResolver.getType(faceReferenceUri!!) ?: "image/jpeg"
@@ -340,7 +341,7 @@ fun FilmmakerStudioScreen(
                         fileUri = faceReferenceUri,
                         mimeType = mime,
                         fileSizeBytes = faceReferenceSize,
-                        model = proModel,
+                        model = activeModel,
                         systemInstruction = sysInstruction,
                         prompt = prompt,
                         onStatus = { s -> statusText = s },
@@ -349,19 +350,20 @@ fun FilmmakerStudioScreen(
                 } else {
                     geminiClient.streamChat(
                         apiKey = apiKey,
-                        model = proModel,
+                        model = activeModel,
                         systemInstruction = sysInstruction,
                         history = emptyList(),
                         userPrompt = prompt,
+                        backupGroqKey = backupGroq,
                         onChunk = { partial -> output = partial }
                     )
                 }
 
                 result.onSuccess {
                     output = it
-                    statusText = "Generated online via $proModel."
+                    statusText = "Generated via $activeModel."
                 }.onFailure {
-                    statusText = "Gemini error: ${it.message}"
+                    statusText = "AI error: ${it.message}"
                 }
                 busy = false
             } else {

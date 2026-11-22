@@ -30,6 +30,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.zeeai.companion.offline.OfflineConversationalBrain
 import com.zeeai.companion.ai.GeminiNativeClient
 import com.zeeai.companion.automation.NativePhoneCommander
 import com.zeeai.companion.automation.PendingConfirmation
@@ -60,6 +64,7 @@ private val BgBlackNavy = Color(0xFF060913)
 private val CardSurface = Color(0xFF0B1120)
 private val Silver = Color(0xFFC8D1E0)
 private val ElectricBlue = Color(0xFF2F80FF)
+private val Cyan = Color(0xFF00F0FF)
 
 @Composable
 fun ZeeNativeApp(
@@ -87,7 +92,6 @@ fun ZeeNativeApp(
 
     var activeTab by remember { mutableStateOf("companion") } // companion | memory | models | settings
     var activeCharId by remember { mutableStateOf("zee") }    // zee | zhee
-    var isListening by remember { mutableStateOf(false) }
     var isSpeaking by remember { mutableStateOf(false) }
     var isGenerating by remember { mutableStateOf(false) }
     var autoSpeak by remember { mutableStateOf(true) }
@@ -104,13 +108,10 @@ fun ZeeNativeApp(
     val voiceController = remember {
         NativeVoiceController(context) { speaking -> isSpeaking = speaking }
     }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            geminiClient.cancelActive()
-            localLlm.cancelActiveGeneration()
-            voiceController.shutdown()
-        }
+    val isMicLockedOn by voiceController.isMicLockedOn.collectAsState()
+    val isAccessibilityConnected by ZeeAccessibilityService.isConnected.collectAsState()
+    var isAccessibilityActive by remember {
+        mutableStateOf(ZeeAccessibilityService.isServiceEnabled(context))
     }
 
     var hasMic by remember {
@@ -122,6 +123,28 @@ fun ZeeNativeApp(
     val micLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> hasMic = granted }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isAccessibilityActive = ZeeAccessibilityService.isServiceEnabled(context)
+                hasMic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            geminiClient.cancelActive()
+            localLlm.cancelActiveGeneration()
+            voiceController.shutdown()
+        }
+    }
 
     val voiceProfile = remember(activeCharId) {
         if (activeCharId == "zhee") {
@@ -197,9 +220,11 @@ fun ZeeNativeApp(
 
             val online = isNetworkAvailable()
             val geminiKey = keyVault.getKey("gemini_api_key")
+            val backupGroq = keyVault.getKey("groq_api_key")
+            val backupOpenRouter = keyVault.getKey("openrouter_api_key")
             val savedFlash = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
 
-            if (online && geminiKey.isNotBlank()) {
+            if (online && (geminiKey.isNotBlank() || backupGroq.isNotBlank() || backupOpenRouter.isNotBlank())) {
                 val historyPairs = messages.takeLast(10).map {
                     (if (it.role == "user") "user" else "model") to it.text
                 }
@@ -209,16 +234,18 @@ fun ZeeNativeApp(
                     systemInstruction = sysPrompt,
                     history = historyPairs,
                     userPrompt = prompt,
+                    backupGroqKey = backupGroq,
+                    backupOpenRouterKey = backupOpenRouter,
                     onChunk = { partial -> streamingReply = partial }
                 )
-                val finalReply = res.getOrElse { "Gemini error: ${it.message}" }
+                val finalReply = res.getOrElse { "Online AI error: ${it.message ?: "Please check internet or API key."}" }
                 dao.insertMessage(
                     ChatMessageEntity(
                         id = UUID.randomUUID().toString(),
                         characterId = activeCharId,
                         role = "assistant",
                         text = finalReply,
-                        source = "gemini-online"
+                        source = "online-ai"
                     )
                 )
                 streamingReply = ""
@@ -256,31 +283,31 @@ fun ZeeNativeApp(
                         },
                         onError = { err ->
                             scope.launch(Dispatchers.Main) {
+                                val fallbackReply = OfflineConversationalBrain.respond(prompt, activeCharId)
                                 dao.insertMessage(
                                     ChatMessageEntity(
                                         id = UUID.randomUUID().toString(),
                                         characterId = activeCharId,
                                         role = "assistant",
-                                        text = "Offline LLM error: $err",
-                                        source = "offline-creative"
+                                        text = fallbackReply,
+                                        source = "offline-companion"
                                     )
                                 )
                                 streamingReply = ""
                                 isGenerating = false
+                                if (autoSpeak) voiceController.speak(fallbackReply, voiceProfile)
                             }
                         }
                     )
                 } else {
-                    val offlineReply = withContext(Dispatchers.Default) {
-                        offlineCreativeFallback(prompt, activeCharId)
-                    }
+                    val offlineReply = OfflineConversationalBrain.respond(prompt, activeCharId)
                     dao.insertMessage(
                         ChatMessageEntity(
                             id = UUID.randomUUID().toString(),
                             characterId = activeCharId,
                             role = "assistant",
                             text = offlineReply,
-                            source = "offline-creative"
+                            source = "offline-companion"
                         )
                     )
                     streamingReply = ""
@@ -481,10 +508,10 @@ fun ZeeNativeApp(
                                 localLlm.cancelActiveGeneration()
                                 voiceController.emergencyStop()
                                 WakeWordForegroundService.stop(context)
-                                isListening = false
                                 isSpeaking = false
                                 isGenerating = false
                                 streamingReply = ""
+                                livePartialVoice = ""
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
@@ -587,9 +614,42 @@ fun ZeeNativeApp(
                                 }
                             }
 
+                            if (isMicLockedOn) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .background(Color(0xFFDC2626), CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            "MIC LOCKED ON (Tap Mic to Stop)",
+                                            color = Color(0xFFF87171),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    if (livePartialVoice.isNotBlank()) {
+                                        Text(
+                                            livePartialVoice.take(24) + if (livePartialVoice.length > 24) "..." else "",
+                                            color = Cyan,
+                                            fontSize = 11.sp,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+
                             // Voice + Text Composer
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -599,37 +659,30 @@ fun ZeeNativeApp(
                                             micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                             return@Button
                                         }
-                                        if (isListening) {
+                                        if (isMicLockedOn) {
                                             voiceController.stopListening()
-                                            isListening = false
-                                            WakeWordForegroundService.resume(context)
-                                        } else {
-                                            WakeWordForegroundService.pause(context)
-                                            isListening = true
                                             livePartialVoice = ""
-                                            voiceController.startListening(
+                                        } else {
+                                            livePartialVoice = ""
+                                            voiceController.startContinuousListening(
                                                 languageTag = voiceProfile.languageTag,
                                                 preferOffline = !isNetworkAvailable(),
                                                 onPartial = { livePartialVoice = it },
                                                 onFinal = { finalText ->
-                                                    isListening = false
                                                     livePartialVoice = ""
-                                                    WakeWordForegroundService.resume(context)
                                                     if (finalText.isNotBlank()) sendUserTurn(finalText)
                                                 },
                                                 onError = {
-                                                    isListening = false
                                                     livePartialVoice = it
-                                                    WakeWordForegroundService.resume(context)
                                                 }
                                             )
                                         }
                                     },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isListening) Color(0xFFDC2626) else ElectricBlue
+                                        containerColor = if (isMicLockedOn) Color(0xFFDC2626) else ElectricBlue
                                     )
                                 ) {
-                                    Text(if (isListening) "Stop" else "Mic", fontSize = 12.sp)
+                                    Text(if (isMicLockedOn) "Stop" else "Mic", fontSize = 12.sp)
                                 }
 
                                 OutlinedTextField(
@@ -752,9 +805,10 @@ fun ZeeNativeApp(
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text("Phone Control (Accessibility)", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                        val isAccEnabled = isAccessibilityActive || isAccessibilityConnected
                                         Text(
-                                            if (ZeeAccessibilityService.isConnected()) "Active • Ready for system gestures" else "Not Enabled",
-                                            color = if (ZeeAccessibilityService.isConnected()) Color(0xFF34D399) else Color(0xFFFBBF24),
+                                            if (isAccEnabled) "Active • Ready for system gestures" else "Not Enabled",
+                                            color = if (isAccEnabled) Color(0xFF34D399) else Color(0xFFFBBF24),
                                             fontSize = 12.sp
                                         )
                                     }
@@ -763,7 +817,10 @@ fun ZeeNativeApp(
                                             Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                         )
-                                    }) { Text(if (ZeeAccessibilityService.isConnected()) "Settings" else "Enable") }
+                                    }) {
+                                        val isAccEnabled = isAccessibilityActive || isAccessibilityConnected
+                                        Text(if (isAccEnabled) "Settings" else "Enable")
+                                    }
                                 }
                             }
 
@@ -1004,6 +1061,24 @@ fun ZeeNativeApp(
                                     }
                                 }
 
+                                Button(
+                                    onClick = {
+                                        scope.launch {
+                                            statusMsg = "Testing active AI connection..."
+                                            val diag = geminiClient.testAiConnection(
+                                                geminiKey = geminiInput,
+                                                groqKey = keyVault.getKey("groq_api_key"),
+                                                openRouterKey = keyVault.getKey("openrouter_api_key")
+                                            )
+                                            statusMsg = diag
+                                            keyVault.saveKey("gemini_status_msg", statusMsg)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                                ) {
+                                    Text("Test Connection")
+                                }
+
                                 if (isVerified) {
                                     TextButton(onClick = {
                                         geminiInput = ""
@@ -1015,7 +1090,7 @@ fun ZeeNativeApp(
                                         keyVault.removeKey("gemini_status_msg")
                                         keyVault.removeKey("gemini_discovered_models")
                                     }) {
-                                        Text("Clear Key", color = Color(0xFFEF4444))
+                                        Text("Clear", color = Color(0xFFEF4444))
                                     }
                                 }
                             }
@@ -1100,19 +1175,129 @@ fun ZeeNativeApp(
 
                             HorizontalDivider(color = Color(0xFF1E293B))
 
-                            Text("Hugging Face Access Token (Optional)", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                            Text("Only needed if you want to download gated Google Gemma models directly from Hugging Face.", color = Silver, fontSize = 11.sp)
+                            Text("Hugging Face Access Token (Zero-Gate Connect)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("Connect your free Hugging Face User Access Token (read permissions) to download gated models with 100% verified authorization.", color = Silver, fontSize = 11.sp)
 
                             var hfTokenInput by remember { mutableStateOf(keyVault.getKey("hf_token")) }
+                            var hfStatusMsg by remember { mutableStateOf(keyVault.getKey("hf_status_msg")) }
+                            var isHfConnected by remember { mutableStateOf(keyVault.getKey("hf_token_status") == "connected") }
+                            var isHfValidating by remember { mutableStateOf(false) }
+
                             OutlinedTextField(
                                 value = hfTokenInput,
-                                onValueChange = {
-                                    hfTokenInput = it
-                                    keyVault.saveKey("hf_token", it.trim())
-                                },
+                                onValueChange = { hfTokenInput = it },
                                 visualTransformation = PasswordVisualTransformation(),
                                 placeholder = { Text("hf_...") },
-                                label = { Text("Hugging Face User Token") },
+                                label = { Text("Hugging Face User Access Token") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    onClick = {
+                                        val clean = hfTokenInput.trim()
+                                        if (clean.isNotBlank()) {
+                                            isHfValidating = true
+                                            hfStatusMsg = "Verifying Hugging Face Token..."
+                                            scope.launch {
+                                                val res = modelStore.verifyHuggingFaceToken(clean)
+                                                isHfValidating = false
+                                                res.onSuccess { username ->
+                                                    isHfConnected = true
+                                                    hfStatusMsg = "Connected as @$username (Hugging Face Verified)"
+                                                    keyVault.saveKey("hf_token", clean)
+                                                    keyVault.saveKey("hf_token_status", "connected")
+                                                    keyVault.saveKey("hf_status_msg", hfStatusMsg)
+                                                }.onFailure { err ->
+                                                    isHfConnected = false
+                                                    hfStatusMsg = "Connection failed: ${err.message ?: "Invalid Token"}"
+                                                    keyVault.saveKey("hf_token_status", "invalid")
+                                                    keyVault.saveKey("hf_status_msg", hfStatusMsg)
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = !isHfValidating && hfTokenInput.isNotBlank()
+                                ) {
+                                    if (isHfValidating) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = Color.White,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Verifying...")
+                                    } else {
+                                        Text("Connect Hugging Face")
+                                    }
+                                }
+
+                                if (isHfConnected) {
+                                    TextButton(onClick = {
+                                        hfTokenInput = ""
+                                        isHfConnected = false
+                                        hfStatusMsg = ""
+                                        keyVault.removeKey("hf_token")
+                                        keyVault.removeKey("hf_token_status")
+                                        keyVault.removeKey("hf_status_msg")
+                                    }) {
+                                        Text("Disconnect", color = Color(0xFFEF4444))
+                                    }
+                                }
+                            }
+
+                            if (hfStatusMsg.isNotBlank()) {
+                                val hfBadgeBg = if (isHfConnected) Color(0xFF064E3B) else Color(0xFF7F1D1D)
+                                val hfBadgeFg = if (isHfConnected) Color(0xFF34D399) else Color(0xFFFCA5A5)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(hfBadgeBg, RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = (if (isHfConnected) "● " else "▲ ") + hfStatusMsg,
+                                        color = hfBadgeFg,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = Color(0xFF1E293B))
+
+                            Text("Free Backup AI Providers (Groq & OpenRouter)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("If Gemini runs out of free quota (429), ZEE AI automatically fails over to Groq or OpenRouter seamlessly.", color = Silver, fontSize = 11.sp)
+
+                            var groqInput by remember { mutableStateOf(keyVault.getKey("groq_api_key")) }
+                            OutlinedTextField(
+                                value = groqInput,
+                                onValueChange = {
+                                    groqInput = it
+                                    keyVault.saveKey("groq_api_key", it.trim())
+                                },
+                                visualTransformation = PasswordVisualTransformation(),
+                                placeholder = { Text("gsk_...") },
+                                label = { Text("Groq API Key (Free llama-3.3-70b-versatile)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+
+                            var openRouterInput by remember { mutableStateOf(keyVault.getKey("openrouter_api_key")) }
+                            OutlinedTextField(
+                                value = openRouterInput,
+                                onValueChange = {
+                                    openRouterInput = it
+                                    keyVault.saveKey("openrouter_api_key", it.trim())
+                                },
+                                visualTransformation = PasswordVisualTransformation(),
+                                placeholder = { Text("sk-or-...") },
+                                label = { Text("OpenRouter API Key (Free models)") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true
                             )

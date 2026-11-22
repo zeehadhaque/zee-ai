@@ -1,14 +1,19 @@
 package com.zeeai.companion.automation
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.Context
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class ZeeAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         activeInstance = this
+        isConnected.value = true
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -22,11 +27,13 @@ class ZeeAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         activeInstance = null
+        isConnected.value = false
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
         activeInstance = null
+        isConnected.value = false
         super.onDestroy()
     }
 
@@ -111,8 +118,19 @@ class ZeeAccessibilityService : AccessibilityService() {
         @Volatile
         private var activeInstance: ZeeAccessibilityService? = null
 
+        val isConnected = MutableStateFlow(false)
+
         fun getInstance(): ZeeAccessibilityService? = activeInstance
 
-        fun isConnected(): Boolean = activeInstance != null
+        fun isConnected(): Boolean = isConnected.value || activeInstance != null
+
+        fun isServiceEnabled(context: Context): Boolean {
+            if (isConnected.value || activeInstance != null) return true
+            return runCatching {
+                val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
+                val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                enabledServices.any { it.resolveInfo?.serviceInfo?.packageName == context.packageName }
+            }.getOrDefault(false)
+        }
     }
 }

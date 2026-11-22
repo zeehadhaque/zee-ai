@@ -117,16 +117,18 @@ fun ResearchAndTrendsScreen(
         statusText = "Searching live web for: $label..."
 
         val charName = if (activeCharId == "zhee") "ZHEE" else "ZEE"
-        val proModel = keyVault.getKey("gemini_pro_model").ifBlank { "gemini-2.5-pro" }
+        val activeModel = keyVault.getKey("gemini_flash_model").ifBlank { "gemini-2.5-flash" }
+        val backupGroq = keyVault.getKey("groq_api_key")
         val sysInstruction =
             "You are $charName running ZEE Research Studio with live Google Search Grounding. Always perform a real web search, synthesize verified up-to-date facts with dates, and keep structure crisp. Match the user's language."
 
         scope.launch {
             val res = geminiClient.streamGrounded(
                 apiKey = apiKey,
-                model = proModel,
+                model = activeModel,
                 systemInstruction = sysInstruction,
                 userPrompt = prompt,
+                backupGroqKey = backupGroq,
                 onChunk = { text, cites, queries ->
                     scope.launch(Dispatchers.Main) {
                         reportText = text
