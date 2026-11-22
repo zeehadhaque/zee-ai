@@ -851,6 +851,58 @@ fun ZeeNativeApp(
                         val hfToken = keyVault.getKey("hf_token")
 
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            // 24/7 Background Voice Assistant Card (Always Allow)
+                            item {
+                                val isWakeRunning by WakeWordEventBus.isRunning.collectAsState()
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(if (isWakeRunning) Color(0xFF064E3B) else CardSurface, RoundedCornerShape(14.dp))
+                                        .border(1.dp, if (isWakeRunning) Color(0xFF34D399) else Silver.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("24/7 Background Voice Assistant", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            if (isWakeRunning) "● Active • App বন্ধ থাকলেও ভয়েস কমান্ডে কাজ করবে ও মুখে বলবে"
+                                            else "○ Inactive • App কেটে দিলেও ভয়েস চালু রাখতে Always Allow চাপুন",
+                                            color = if (isWakeRunning) Color(0xFF34D399) else Silver,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    Button(
+                                        onClick = {
+                                            if (isWakeRunning) {
+                                                WakeWordForegroundService.stop(context)
+                                            } else {
+                                                WakeWordForegroundService.start(context)
+                                                runCatching {
+                                                    val powerIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                                        data = Uri.parse("package:${context.packageName}")
+                                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    }
+                                                    context.startActivity(powerIntent)
+                                                }
+                                                runCatching {
+                                                    val appSettingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                        data = Uri.parse("package:${context.packageName}")
+                                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    }
+                                                    context.startActivity(appSettingsIntent)
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (isWakeRunning) Color(0xFFDC2626) else ElectricBlue
+                                        )
+                                    ) {
+                                        Text(if (isWakeRunning) "Stop" else "Always Allow", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+
                             // Phone Control Status
                             item {
                                 Row(

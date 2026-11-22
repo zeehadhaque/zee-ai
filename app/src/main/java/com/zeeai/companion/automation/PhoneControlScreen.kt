@@ -2,6 +2,7 @@ package com.zeeai.companion.automation
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
@@ -293,9 +294,93 @@ fun PhoneControlScreen(
                 .background(CardNavy, RoundedCornerShape(16.dp))
                 .border(1.dp, Silver.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
                 .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("System Permissions & Engine Status", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Text("System Permissions & 24/7 Engine Status", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+
+            // Always Allow in Background 24/7 Card
+            val wakeWordRunning by com.zeeai.companion.voice.WakeWordEventBus.isRunning.collectAsState()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (wakeWordRunning) Color(0xFF064E3B) else Color(0xFF1E293B),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .border(
+                        1.dp,
+                        if (wakeWordRunning) NeonEmerald.copy(alpha = 0.6f) else ElectricBlue.copy(alpha = 0.4f),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(12.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Microphone: Always Allow (Background 24/7)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                if (wakeWordRunning)
+                                    "● Active • App বন্ধ থাকলেও সারাক্ষণ ভয়েস শুনে কাজ করবে ও মুখে উত্তর দেবে"
+                                else
+                                    "App কেটে দিলেও ব্যাকগ্রাউন্ডে ভয়েস কমান্ড শুনে কাজ করবে ও উত্তর দেবে",
+                                color = if (wakeWordRunning) NeonEmerald else Silver,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                com.zeeai.companion.voice.WakeWordForegroundService.start(context)
+                                runCatching {
+                                    val powerIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(powerIntent)
+                                }
+                                runCatching {
+                                    val appSettingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(appSettingsIntent)
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (wakeWordRunning) NeonEmerald else ElectricBlue
+                            ),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                if (wakeWordRunning) "✓ Always Allow (Running 24/7)" else "🎙️ Always Allow (Background ON)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        if (wakeWordRunning) {
+                            OutlinedButton(onClick = {
+                                com.zeeai.companion.voice.WakeWordForegroundService.stop(context)
+                            }) {
+                                Text("Stop", color = CrimsonRed, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = Color(0xFF1E293B))
 
             val isAccOk = isAccessibilityActive || isAccessibilityConnected
             Row(
