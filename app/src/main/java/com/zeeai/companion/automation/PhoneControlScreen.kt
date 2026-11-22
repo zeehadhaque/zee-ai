@@ -287,6 +287,99 @@ fun PhoneControlScreen(
             }
         }
 
+        // Offline Voice Packs (ZEE Male & ZHEE Female) Card
+        var voicePackInfo by remember { mutableStateOf(voiceController.getVoicePackInfo()) }
+        var voiceStatusMsg by remember { mutableStateOf("") }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(CardNavy, RoundedCornerShape(16.dp))
+                .border(1.dp, ElectricBlue.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "🗣️ Offline Voice Packs (ZEE & ZHEE)",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+                Text(
+                    if (voicePackInfo.hasBengali) "✓ Offline Ready" else "⚠️ Pack Needed",
+                    color = if (voicePackInfo.hasBengali) NeonEmerald else Color(0xFFFBBF24),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Text(
+                "অফলাইনে কথা বলা ও ফোনের অ্যাকশন মুখে শোনার জন্য বাংলা ভয়েস প্যাক ডাউনলোড করুন:",
+                color = Silver,
+                fontSize = 11.sp
+            )
+
+            if (voiceStatusMsg.isNotBlank()) {
+                Text(voiceStatusMsg, color = Cyan, fontSize = 11.sp)
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        voiceStatusMsg = "Google TTS ওপেন হচ্ছে... Bengali / Male ভয়েস প্যাক ইনস্টল করুন।"
+                        voiceController.launchVoiceDataInstall(context, isFemale = false)
+                        voicePackInfo = voiceController.getVoicePackInfo()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+                ) {
+                    Text("📥 ZEE Male Pack", fontSize = 11.sp)
+                }
+                Button(
+                    onClick = {
+                        voiceStatusMsg = "Google TTS ওপেন হচ্ছে... Bengali / Female ভয়েস প্যাক ইনস্টল করুন।"
+                        voiceController.launchVoiceDataInstall(context, isFemale = true)
+                        voicePackInfo = voiceController.getVoicePackInfo()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
+                ) {
+                    Text("📥 ZHEE Female Pack", fontSize = 11.sp)
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        voiceStatusMsg = "ZEE (Male) অফলাইন ভয়েস টেস্ট হচ্ছে..."
+                        voiceController.testVoiceSample(isFemale = false)
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("🔊 Test ZEE Male", fontSize = 11.sp)
+                }
+                OutlinedButton(
+                    onClick = {
+                        voiceStatusMsg = "ZHEE (Female) অফলাইন ভয়েস টেস্ট হচ্ছে..."
+                        voiceController.testVoiceSample(isFemale = true)
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("🔊 Test ZHEE Female", fontSize = 11.sp)
+                }
+            }
+        }
+
         // System Services & Permissions Card
         Column(
             modifier = Modifier

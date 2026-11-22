@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -16,6 +17,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
+
+data class TtsVoicePackInfo(
+    val totalVoices: Int,
+    val offlineVoices: Int,
+    val hasBengali: Boolean,
+    val hasEnglish: Boolean,
+    val defaultEngine: String
+)
 
 data class NativeVoiceProfile(
     val languageTag: String, // "bn-BD", "en-US", "hi-IN", "ur-PK"
@@ -378,6 +387,88 @@ class NativeVoiceController(
             destroyRecognizerInternal()
             WakeWordForegroundService.resume(context)
         }
+    }
+
+    fun getVoicePackInfo(): TtsVoicePackInfo {
+        val allVoices = runCatching { tts?.voices }.getOrNull() ?: emptySet()
+        val total = allVoices.size
+        val offline = allVoices.count { !it.isNetworkConnectionRequired }
+        val hasBn = allVoices.any { it.locale.language.equals("bn", ignoreCase = true) } ||
+                    (tts?.isLanguageAvailable(Locale.forLanguageTag("bn-BD")) ?: -1) >= 0
+        val hasEn = allVoices.any { it.locale.language.equals("en", ignoreCase = true) } ||
+                    (tts?.isLanguageAvailable(Locale.US) ?: -1) >= 0
+        val engine = tts?.defaultEngine ?: "Default"
+        return TtsVoicePackInfo(total, offline, hasBn, hasEn, engine)
+    }
+
+    fun launchVoiceDataInstall(context: Context, isFemale: Boolean = false) {
+        val installIntent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            setPackage("com.google.android.tts")
+        }
+        val genericInstallIntent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val ttsSettingsIntent = Intent("com.android.settings.TTS_SETTINGS").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val voiceInputSettings = Intent("android.settings.VOICE_INPUT_SETTINGS").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        try {
+            context.startActivity(installIntent)
+        } catch (_: Exception) {
+            try {
+                context.startActivity(genericInstallIntent)
+            } catch (_: Exception) {
+                try {
+                    context.startActivity(ttsSettingsIntent)
+                } catch (_: Exception) {
+                    try {
+                        context.startActivity(voiceInputSettings)
+                    } catch (_: Exception) {
+                        context.startActivity(Intent(Settings.ACTION_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                    }
+                }
+            }
+        }
+    }
+
+    fun openTtsSettings(context: Context) {
+        val intent = Intent("com.android.settings.TTS_SETTINGS").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            val fallback = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                context.startActivity(fallback)
+            } catch (_: Exception) {
+                context.startActivity(Intent(Settings.ACTION_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            }
+        }
+    }
+
+    fun testVoiceSample(isFemale: Boolean) {
+        val profile = if (isFemale) {
+            NativeVoiceProfile(languageTag = "bn-BD", pitch = 1.18f, rate = 0.96f, isFemale = true)
+        } else {
+            NativeVoiceProfile(languageTag = "bn-BD", pitch = 0.85f, rate = 1.02f, isFemale = false)
+        }
+        val testPhrase = if (isFemale) {
+            "হ্যালো! আমি ঝী। অফলাইন ভয়েস প্যাক সক্রিয় আছে এবং আমি সম্পূর্ণ প্রস্তুত।"
+        } else {
+            "নমস্কার! আমি জী। অফলাইন ভয়েস প্যাক কাজ করছে। বলুন আমি কীভাবে সাহায্য করতে পারি।"
+        }
+        speak(testPhrase, profile)
     }
 
     fun emergencyStop() {

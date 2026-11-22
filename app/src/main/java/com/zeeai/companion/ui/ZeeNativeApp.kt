@@ -972,6 +972,134 @@ fun ZeeNativeApp(
                                 }
                             }
 
+                            // Offline Voice Packs (ZEE Male & ZHEE Female) Download & Test Card
+                            item {
+                                var voiceInfo by remember { mutableStateOf(voiceController.getVoicePackInfo()) }
+                                var voiceActionFeedback by remember { mutableStateOf("") }
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(CardSurface, RoundedCornerShape(14.dp))
+                                        .border(1.dp, ElectricBlue.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            "🗣️ Offline Voice Packs (ZEE & ZHEE)",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            if (voiceInfo.hasBengali) "✓ Offline Ready" else "⚠️ Pack Needed",
+                                            color = if (voiceInfo.hasBengali) Color(0xFF34D399) else Color(0xFFFBBF24),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+
+                                    Text(
+                                        "ইন্টারনেট ছাড়া ZEE (Male) ও ZHEE (Female) এর সাথে বাংলায় কথা বলা ও মুখে স্পষ্ট উত্তর শোনার জন্য নিচের অফলাইন ভয়েস প্যাক ডাউনলোড করুন।",
+                                        color = Silver,
+                                        fontSize = 11.sp
+                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            "ভয়েস সিস্টেম: ${voiceInfo.defaultEngine.substringAfterLast('.')}",
+                                            color = Silver.copy(alpha = 0.7f),
+                                            fontSize = 10.sp
+                                        )
+                                        Text(
+                                            "• অফলাইন ভয়েস: ${voiceInfo.offlineVoices} টি",
+                                            color = Color(0xFF34D399),
+                                            fontSize = 10.sp
+                                        )
+                                    }
+
+                                    if (voiceActionFeedback.isNotBlank()) {
+                                        Text(
+                                            voiceActionFeedback,
+                                            color = Color(0xFF38BDF8),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+
+                                    // Direct Download Buttons for ZEE and ZHEE
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = {
+                                                voiceActionFeedback = "Google Speech Synthesis খুলছে... Bengali / Male ভয়েস প্যাক ডাউনলোড করুন।"
+                                                voiceController.launchVoiceDataInstall(context, isFemale = false)
+                                                voiceInfo = voiceController.getVoicePackInfo()
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+                                        ) {
+                                            Text("📥 ZEE Male Voice Pack", fontSize = 11.sp)
+                                        }
+                                        Button(
+                                            onClick = {
+                                                voiceActionFeedback = "Google Speech Synthesis খুলছে... Bengali / Female ভয়েস প্যাক ডাউনলোড করুন।"
+                                                voiceController.launchVoiceDataInstall(context, isFemale = true)
+                                                voiceInfo = voiceController.getVoicePackInfo()
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
+                                        ) {
+                                            Text("📥 ZHEE Female Pack", fontSize = 11.sp)
+                                        }
+                                    }
+
+                                    // Voice Test Buttons
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                voiceActionFeedback = "ZEE (Male) অফলাইন ভয়েস নমুনা প্লে হচ্ছে..."
+                                                voiceController.testVoiceSample(isFemale = false)
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("🔊 Test ZEE Male", fontSize = 11.sp)
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                voiceActionFeedback = "ZHEE (Female) অফলাইন ভয়েস নমুনা প্লে হচ্ছে..."
+                                                voiceController.testVoiceSample(isFemale = true)
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("🔊 Test ZHEE Female", fontSize = 11.sp)
+                                        }
+                                    }
+
+                                    // Settings button
+                                    TextButton(
+                                        onClick = {
+                                            voiceController.openTtsSettings(context)
+                                        },
+                                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                                    ) {
+                                        Text("⚙️ Android TTS Engine & Voice Settings", color = Silver, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+
                             // Catalog Models
                             items(models, key = { it.spec.id }) { item ->
                                 Column(
