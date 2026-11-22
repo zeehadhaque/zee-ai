@@ -85,6 +85,16 @@ class OfflineModelStoreManager(private val context: Context) {
             downloadUrl = "https://huggingface.co/google/gemma-3-12b-it/resolve/main/gemma-3-12b-it-int4.task"
         ),
         OfflineModelSpec(
+            id = "gemma-3-27b-it-task",
+            name = "Google Gemma 3 27B / Gemma 4 (Titan Grade Intelligence)",
+            type = OfflineModelType.LLM,
+            language = "27B Ultimate Autonomous On-Device Reasoning & Multi-turn Planning",
+            approxSizeMb = 15800,
+            minRamGb = 16,
+            fileName = "gemma-3-27b-it-int4.task",
+            downloadUrl = "https://huggingface.co/google/gemma-3-27b-it/resolve/main/gemma-3-27b-it-int4.task"
+        ),
+        OfflineModelSpec(
             id = "gemma2-9b-it-int4",
             name = "Google Gemma 2 9B Instruct (.bin / .task INT4)",
             type = OfflineModelType.LLM,
@@ -93,6 +103,16 @@ class OfflineModelStoreManager(private val context: Context) {
             minRamGb = 8,
             fileName = "gemma2-9b-it-gpu-int4.bin",
             downloadUrl = "https://huggingface.co/google/gemma-2-9b-it/resolve/main/gemma-2-9b-it-gpu-int4.bin"
+        ),
+        OfflineModelSpec(
+            id = "gemma-7b-it-gpu-int4",
+            name = "Google Gemma 1.1 7B Instruct (MediaPipe GPU INT4)",
+            type = OfflineModelType.LLM,
+            language = "7B Full Scale Knowledge & Bengali Creative Writing",
+            approxSizeMb = 4250,
+            minRamGb = 8,
+            fileName = "gemma-7b-it-gpu-int4.bin",
+            downloadUrl = "https://huggingface.co/google/gemma-7b-it/resolve/main/gemma-7b-it-gpu-int4.bin"
         ),
         OfflineModelSpec(
             id = "gemma-4b-it-task",
@@ -113,6 +133,16 @@ class OfflineModelStoreManager(private val context: Context) {
             minRamGb = 6,
             fileName = "gemma-3n-E2B-it-int4.task",
             downloadUrl = "https://huggingface.co/abhianand1093/llminferencedemo/resolve/main/gemma-3n-E2B-it-int4.task"
+        ),
+        OfflineModelSpec(
+            id = "gemma-3-1b-it-task",
+            name = "Google Gemma 3 1B Instruct (Ultra-Fast Mobile .task)",
+            type = OfflineModelType.LLM,
+            language = "Lightweight Instant Offline Voice Assistant & Fast Battery Saving",
+            approxSizeMb = 750,
+            minRamGb = 3,
+            fileName = "gemma-3-1b-it-int4.task",
+            downloadUrl = "https://huggingface.co/google/gemma-3-1b-it/resolve/main/gemma-3-1b-it-int4.task"
         ),
         OfflineModelSpec(
             id = "gemma2-2b-cpu-int8",
