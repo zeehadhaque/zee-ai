@@ -1130,9 +1130,29 @@ fun ZeeNativeApp(
                                         }
                                     }
 
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        val badgeBg = if (item.spec.isGated) Color(0xFF78350F) else Color(0xFF064E3B)
+                                        val badgeFg = if (item.spec.isGated) Color(0xFFFBBF24) else Color(0xFF34D399)
+                                        Box(
+                                            modifier = Modifier
+                                                .background(badgeBg, RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(item.spec.badge, color = badgeFg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Text(
+                                            "${item.spec.type} • ~${item.spec.approxSizeMb} MB • RAM: ${item.spec.minRamGb}GB+",
+                                            color = Silver,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+
                                     Text(
-                                        "${item.spec.type} • ~${item.spec.approxSizeMb} MB • ${item.spec.language} • RAM: ${item.spec.minRamGb}GB+",
-                                        color = Silver,
+                                        item.spec.language,
+                                        color = Silver.copy(alpha = 0.85f),
                                         fontSize = 11.sp
                                     )
 
@@ -1156,13 +1176,20 @@ fun ZeeNativeApp(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .background(Color(0xFF7F1D1D), RoundedCornerShape(6.dp))
-                                                .padding(8.dp)
+                                                .padding(10.dp)
                                         ) {
-                                            Text(
-                                                "Download Error: ${item.error}",
-                                                color = Color(0xFFFCA5A5),
-                                                fontSize = 11.sp
-                                            )
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text(
+                                                    "❌ ${item.error}",
+                                                    color = Color(0xFFFCA5A5),
+                                                    fontSize = 11.sp
+                                                )
+                                                Text(
+                                                    "💡 পরামর্শ: কোনো Hugging Face টোকেন বা ঝামেলা ছাড়াই সরাসরি ব্যবহারের জন্য '⚡ 100% Free Direct' চিহ্নিত মডেলগুলো ডাউনলোড করুন।",
+                                                    color = Color(0xFFE2E8F0),
+                                                    fontSize = 10.sp
+                                                )
+                                            }
                                         }
                                     }
 
@@ -1539,6 +1566,20 @@ fun ZeeNativeApp(
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(CardSurface, RoundedCornerShape(8.dp))
+                                    .border(1.dp, ElectricBlue.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                    .padding(10.dp)
+                            ) {
+                                Text(
+                                    "💡 Hugging Face গাইড: Hugging Face-এর অফিসিয়াল গুগল মডেল (যেমন Gemma 12B/27B) 'Gated' থাকে, যার জন্য টোকেন থাকা সত্ত্বেও ব্রাউজারে huggingface.co-তে লগইন করে মডেল পেইজে 'Acknowledge license' বাটনে একবার ক্লিক করতে হয়। কোনো টোকেন বা ঝামেলা ছাড়া সরাসরি ব্যবহারের জন্য 'মডেল ও কন্ট্রোল' ট্যাবে থাকা '⚡ 100% Free Direct' Gemma মডেলগুলো ডাউনলোড করুন।",
+                                    color = Silver,
+                                    fontSize = 11.sp
+                                )
                             }
 
                             HorizontalDivider(color = Color(0xFF1E293B))
