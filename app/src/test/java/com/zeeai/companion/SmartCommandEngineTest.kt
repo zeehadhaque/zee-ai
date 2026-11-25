@@ -1,5 +1,6 @@
 package com.zeeai.companion
 
+import com.zeeai.companion.ai.GeminiNativeClient
 import com.zeeai.companion.offline.OfflineConversationalBrain
 import com.zeeai.companion.persona.CompanionPersonaEngine
 import com.zeeai.companion.persona.PersonaType
@@ -98,5 +99,34 @@ class SmartCommandEngineTest {
         assertTrue(OnlineHumanVoiceCatalog.elevenLabsFemaleVoices.isNotEmpty())
         assertTrue(OnlineHumanVoiceCatalog.geminiMaleVoices.any { it.name == "Charon" })
         assertTrue(OnlineHumanVoiceCatalog.geminiFemaleVoices.any { it.name == "Kore" })
+    }
+
+    @Test
+    fun `gemini auto discovery filters deprecated models and ranks latest dynamically`() {
+        assertFalse(GeminiNativeClient.isValidChatModel("gemini-1.5-flash"))
+        assertFalse(GeminiNativeClient.isValidChatModel("gemini-1.5-pro"))
+        assertFalse(GeminiNativeClient.isValidChatModel("gemini-2.5-flash-preview-tts"))
+        assertFalse(GeminiNativeClient.isValidChatModel("gemini-2.5-flash-image-preview"))
+        assertFalse(GeminiNativeClient.isValidChatModel("text-embedding-004"))
+        assertTrue(GeminiNativeClient.isValidChatModel("gemini-2.5-flash"))
+        assertTrue(GeminiNativeClient.isValidChatModel("gemini-2.5-pro"))
+        assertTrue(GeminiNativeClient.isValidChatModel("gemini-3.5-flash"))
+
+        val mockDiscovered = listOf(
+            "gemini-2.0-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-3.0-flash",
+            "gemini-2.5-pro",
+            "gemini-1.5-pro",
+            "gemini-2.5-flash-preview-tts"
+        )
+        val rankedFlash = GeminiNativeClient.rankFlashModels(mockDiscovered)
+        assertEquals("gemini-3.0-flash", rankedFlash.first())
+        assertFalse(rankedFlash.contains("gemini-1.5-pro"))
+        assertFalse(rankedFlash.contains("gemini-2.5-flash-preview-tts"))
+
+        val rankedPro = GeminiNativeClient.rankProModels(mockDiscovered)
+        assertEquals("gemini-2.5-pro", rankedPro.first())
     }
 }
