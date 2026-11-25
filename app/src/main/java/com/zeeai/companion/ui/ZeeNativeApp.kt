@@ -1788,8 +1788,8 @@ fun ZeeNativeApp(
 
                             HorizontalDivider(color = Color(0xFF1E293B))
 
-                            Text("100% Online Human Voice Studio (ElevenLabs & Gemini 2.5)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                            Text("Pure online studio human voices for ZEE (Male) & ZHEE (Female). Cascade: ElevenLabs -> Gemini 2.5 Studio Audio -> Cloud Neural Voice.", color = Silver, fontSize = 11.sp)
+                            Text("100% Online Human Voice Studio (Edge Neural HD & ElevenLabs)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("Pure online studio human voices for ZEE (Male) & ZHEE (Female): ElevenLabs Multilingual v2 -> Edge Neural Studio HD (Zero Google Robotic TTS).", color = Silver, fontSize = 11.sp)
 
                             var elevenLabsInput by remember { mutableStateOf(keyVault.getKey("elevenlabs_api_key")) }
                             var selectedElevenMale by remember {
@@ -1798,26 +1798,16 @@ fun ZeeNativeApp(
                             var selectedElevenFemale by remember {
                                 mutableStateOf(keyVault.getKey(OnlineHumanVoiceCatalog.KEY_ELEVEN_FEMALE_ID).ifBlank { OnlineHumanVoiceCatalog.DEFAULT_ELEVEN_FEMALE_ID })
                             }
-                            var selectedGeminiMale by remember {
-                                mutableStateOf(keyVault.getKey(OnlineHumanVoiceCatalog.KEY_GEMINI_MALE_VOICE).ifBlank { OnlineHumanVoiceCatalog.DEFAULT_GEMINI_MALE_VOICE })
-                            }
-                            var selectedGeminiFemale by remember {
-                                mutableStateOf(keyVault.getKey(OnlineHumanVoiceCatalog.KEY_GEMINI_FEMALE_VOICE).ifBlank { OnlineHumanVoiceCatalog.DEFAULT_GEMINI_FEMALE_VOICE })
-                            }
                             var syncedAccountVoices by remember { mutableStateOf<List<com.zeeai.companion.voice.ElevenLabsVoicePreset>>(emptyList()) }
                             var voiceStudioMsg by remember { mutableStateOf("") }
 
                             fun persistAndSyncVoiceConfig() {
                                 val cfg = com.zeeai.companion.voice.OnlineVoiceConfig(
                                     elevenLabsMaleId = selectedElevenMale,
-                                    elevenLabsFemaleId = selectedElevenFemale,
-                                    geminiMaleVoice = selectedGeminiMale,
-                                    geminiFemaleVoice = selectedGeminiFemale
+                                    elevenLabsFemaleId = selectedElevenFemale
                                 )
                                 keyVault.saveKey(OnlineHumanVoiceCatalog.KEY_ELEVEN_MALE_ID, selectedElevenMale)
                                 keyVault.saveKey(OnlineHumanVoiceCatalog.KEY_ELEVEN_FEMALE_ID, selectedElevenFemale)
-                                keyVault.saveKey(OnlineHumanVoiceCatalog.KEY_GEMINI_MALE_VOICE, selectedGeminiMale)
-                                keyVault.saveKey(OnlineHumanVoiceCatalog.KEY_GEMINI_FEMALE_VOICE, selectedGeminiFemale)
                                 voiceController.updateOnlineVoiceConfig(cfg)
                             }
 
