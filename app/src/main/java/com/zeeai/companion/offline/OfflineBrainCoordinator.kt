@@ -27,19 +27,18 @@ class OfflineBrainCoordinator(
 
             // ৩. অফলাইন মডেল ডাউনলোড করা না থাকলে ভদ্রভাবে জানিয়ে দাও (কখনো ক্র্যাশ নয়)
             if (installedModelPath.isNullOrBlank()) {
-                val guide = "নেট বন্ধ আছে বন্ধু! অফলাইনে গল্প, কবিতা, শায়েরি আর যেকোনো সমস্যার সমাধান করতে Models ট্যাব থেকে 'Gemma 3 1B Instruct (.task)' বা 'Gemma 3n E2B (.task)' নামিয়ে নাও।\n\n(তবে ফোন কন্ট্রোল — যেমন 'torch on koro', 'YouTube kholo', 'volume barao', 'koyta baje' — এখনই অফলাইনে কাজ করবে!)"
+                val guide = "নেট বন্ধ আছে বস! অফলাইনে গল্প, কবিতা, শায়েরি আর যেকোনো সমস্যার সমাধান করতে Models ট্যাব থেকে 'Gemma 3 1B Instruct (.task)' বা 'Gemma 3n E2B (.task)' নামিয়ে নাও।\n\n(তবে ফোন কন্ট্রোল — যেমন 'torch on koro', 'YouTube kholo', 'volume barao', 'koyta baje' — এখনই অফলাইনে কাজ করবে বস!)"
                 onStreamingUpdate(guide)
                 return guide
             }
 
-            // ৪. হিউম্যান বেস্ট-ফ্রেন্ড প্রম্পট তৈরি করে অফলাইন LLM স্ট্রিম করো
-            onStreamingUpdate("ভাবছি বন্ধু...")
-            val prompt = OfflineBestFriendPromptBuilder.buildGemmaTurnPrompt(
+            // ৪. হিউম্যান বেস্ট-ফ্রেন্ড প্রম্পট তৈরি করে অফলাইন LLM স্ট্রিম করো (<130 টোকেন ফাস্ট প্রম্পট)
+            onStreamingUpdate("ভাবছি বস...")
+            val prompt = OfflineBestFriendPromptBuilder.buildFastGemmaPrompt(
                 persona = persona,
                 userMessage = userMessage,
                 history = recentHistory,
-                memoryBlock = memoryVault.buildPromptMemoryBlock(userMessage),
-                installedAppsSummary = phoneController.getInstalledAppsHint()
+                memoryBlock = memoryVault.buildPromptMemoryBlock(userMessage)
             )
 
             val genResult = llmEngine.generateStreaming(
@@ -61,7 +60,7 @@ class OfflineBrainCoordinator(
                             if (isNotEmpty()) append("\n\n")
                             append("⚡ ").append(toolLogs.joinToString(" • "))
                         }
-                    }.ifBlank { "আমি আছি বন্ধু, আবার বলো কী নিয়ে কথা বলবে?" }
+                    }.ifBlank { "আমি আছি বস, আবার বলুন কী নিয়ে কথা বলবেন?" }
 
                     onStreamingUpdate(combined)
                     combined
@@ -73,7 +72,7 @@ class OfflineBrainCoordinator(
                 }
             )
         } catch (t: Throwable) {
-            val safe = "⚠️ ছোট্ট একটা অফলাইন এরর হয়েছিল (${t.localizedMessage ?: "Unknown"}), কিন্তু অ্যাপ ক্র্যাশ হতে দিইনি। আবার মেসেজ দাও বন্ধু!"
+            val safe = "⚠️ ছোট্ট একটা অফলাইন এরর হয়েছিল (${t.localizedMessage ?: "Unknown"}), কিন্তু অ্যাপ ক্র্যাশ হতে দিইনি। আবার বলুন বস!"
             onStreamingUpdate(safe)
             safe
         }
