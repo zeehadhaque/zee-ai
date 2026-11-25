@@ -13,6 +13,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.provider.AlarmClock
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -289,6 +290,20 @@ class OfflineAutonomousPhoneController(
                 context.startActivity(launch)
                 return OfflineToolOutcome(true, true, "খুলে দিয়েছি বস, ${matched.loadLabel(pm)} চালু হয়েছে!")
             }
+        }
+        if (normalized == "camera") {
+            val camOk = runCatching {
+                context.startActivity(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            }.getOrDefault(false)
+            if (camOk) return OfflineToolOutcome(true, true, "ক্যামেরা খুলে দিয়েছি বস!")
+        }
+        if (normalized == "settings") {
+            val settingsOk = runCatching {
+                context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            }.getOrDefault(false)
+            if (settingsOk) return OfflineToolOutcome(true, true, "সেটিংস খুলে দিয়েছি বস!")
         }
         return OfflineToolOutcome(true, false, "বস, ফোনে '$rawQuery' নামের অ্যাপটা খুঁজে পেলাম না।")
     }
