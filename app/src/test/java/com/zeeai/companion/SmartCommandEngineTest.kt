@@ -99,8 +99,8 @@ class SmartCommandEngineTest {
 
         assertTrue(OnlineHumanVoiceCatalog.elevenLabsMaleVoices.isNotEmpty())
         assertTrue(OnlineHumanVoiceCatalog.elevenLabsFemaleVoices.isNotEmpty())
-        assertTrue(OnlineHumanVoiceCatalog.geminiMaleVoices.any { it.name == "Charon" })
-        assertTrue(OnlineHumanVoiceCatalog.geminiFemaleVoices.any { it.name == "Kore" })
+        assertTrue(OnlineHumanVoiceCatalog.elevenLabsMaleVoices.any { it.id == OnlineHumanVoiceCatalog.DEFAULT_ELEVEN_MALE_ID })
+        assertTrue(OnlineHumanVoiceCatalog.elevenLabsFemaleVoices.any { it.id == OnlineHumanVoiceCatalog.DEFAULT_ELEVEN_FEMALE_ID })
     }
 
     @Test
