@@ -69,7 +69,7 @@ class NativeVoiceController(
     @Volatile
     private var isProcessingCommand = false
     @Volatile
-    private var useExplicitGoogleService = false
+    private var preferSystemFallbackService = false
     @Volatile
     private var forceEnglishLocaleFallback = false
     private var consecutiveFailureCount = 0
@@ -84,6 +84,10 @@ class NativeVoiceController(
     var onBeforeManualMicStart: (() -> Unit)? = null
     var onFallbackToSystemDialog: (() -> Unit)? = null
 
+    fun clearError() {
+        _lastError.value = null
+    }
+
     private val restartListeningRunnable = Runnable {
         if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
             startListeningInternal()
@@ -97,19 +101,21 @@ class NativeVoiceController(
 
         destroyRecognizerInternal()
 
-        if (!useExplicitGoogleService && hasExplicitGoogleService()) {
-            useExplicitGoogleService = true
-            _statusHint.value = "Switching to Google Speech Engine..."
+        if (!preferSystemFallbackService && watchdogStallCount == 1) {
+            preferSystemFallbackService = true
+            _lastError.value = null
+            _statusHint.value = "Switching speech engine..."
             startListeningInternal()
-        } else if (watchdogStallCount >= 2 && onFallbackToSystemDialog != null) {
-            _statusHint.value = "Opening Google Voice Popup..."
+        } else if (onFallbackToSystemDialog != null) {
+            _lastError.value = null
+            _statusHint.value = "Google Voice ডায়ালগ ওপেন হচ্ছে..."
             _isMicLockedOn.value = false
             _voiceState.value = VoiceState.IDLE
             _micRmsLevel.value = 0f
             onFallbackToSystemDialog?.invoke()
         } else {
-            _lastError.value = "Speech service response slow — retrying mic..."
-            _statusHint.value = "Retrying mic connection..."
+            _lastError.value = null
+            _statusHint.value = "মাইক রিকানেক্ট হচ্ছে..."
             mainHandler.postDelayed(restartListeningRunnable, 500L)
         }
     }
@@ -248,7 +254,7 @@ class NativeVoiceController(
         isProcessingCommand = false
         consecutiveFailureCount = 0
         watchdogStallCount = 0
-        useExplicitGoogleService = false
+        preferSystemFallbackService = false
         forceEnglishLocaleFallback = false
 
         _isMicLockedOn.value = true
@@ -257,7 +263,7 @@ class NativeVoiceController(
         _statusHint.value = "মাইক্রোফোন চালু হচ্ছে..."
 
         activeLanguageTag = languageTag
-        activePreferOffline = preferOffline
+        activePreferOffline = false
         activeOnPartial = onPartial
         activeOnFinal = onFinal
         activeOnError = onError
@@ -269,7 +275,7 @@ class NativeVoiceController(
             if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
                 startListeningInternal()
             }
-        }, 300L)
+        }, 250L)
     }
 
     private fun hasExplicitGoogleService(): Boolean {
@@ -282,7 +288,8 @@ class NativeVoiceController(
     }
 
     private fun createBestRecognizer(): SpeechRecognizer? {
-        if (useExplicitGoogleService) {
+        // Always prioritize official Google RecognitionService first unless retrying OEM default
+        if (!preferSystemFallbackService) {
             val services = runCatching {
                 context.packageManager.queryIntentServices(Intent("android.speech.RecognitionService"), 0)
             }.getOrDefault(emptyList())
@@ -297,12 +304,26 @@ class NativeVoiceController(
             }
         }
 
-        if (!SpeechRecognizer.isRecognitionAvailable(context) && !hasExplicitGoogleService()) {
-            return null
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            val sysRec = runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
+                ?: runCatching { SpeechRecognizer.createSpeechRecognizer(context.applicationContext) }.getOrNull()
+            if (sysRec != null) return sysRec
         }
 
-        return runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
-            ?: runCatching { SpeechRecognizer.createSpeechRecognizer(context.applicationContext) }.getOrNull()
+        // Last-resort attempt on explicit Google service even if preferSystemFallbackService was toggled
+        if (preferSystemFallbackService && hasExplicitGoogleService()) {
+            val services = runCatching {
+                context.packageManager.queryIntentServices(Intent("android.speech.RecognitionService"), 0)
+            }.getOrDefault(emptyList())
+            val googleService = PREFERRED_RECOGNITION_PACKAGES.firstNotNullOfOrNull { pkg ->
+                services.firstOrNull { it.serviceInfo?.packageName == pkg }
+            }
+            if (googleService != null) {
+                val comp = ComponentName(googleService.serviceInfo.packageName, googleService.serviceInfo.name)
+                return runCatching { SpeechRecognizer.createSpeechRecognizer(context, comp) }.getOrNull()
+            }
+        }
+        return null
     }
 
     private fun startListeningInternal() {
@@ -397,12 +418,13 @@ class NativeVoiceController(
                         error == SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT
                     ) {
                         forceEnglishLocaleFallback = true
-                        _lastError.value = "English voice recognition active"
+                        _lastError.value = null
+                        _statusHint.value = "English voice mode active — বলুন বস"
                         mainHandler.post {
                             destroyRecognizerInternal()
                             if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
                                 mainHandler.removeCallbacks(restartListeningRunnable)
-                                mainHandler.postDelayed(restartListeningRunnable, 350L)
+                                mainHandler.postDelayed(restartListeningRunnable, 280L)
                             }
                         }
                         return
@@ -411,30 +433,39 @@ class NativeVoiceController(
                     consecutiveFailureCount++
                     val errText = mapErrorMessage(error)
                     Log.w(TAG, "SpeechRecognizer error=$error ($errText), consecutive=$consecutiveFailureCount")
-                    _lastError.value = errText
-                    _statusHint.value = errText
-                    activeOnError?.invoke(errText)
 
-                    if (consecutiveFailureCount == 1 && !useExplicitGoogleService && hasExplicitGoogleService()) {
-                        useExplicitGoogleService = true
-                    } else if (consecutiveFailureCount >= 3) {
+                    if (consecutiveFailureCount == 1) {
+                        // Quietly switch recognizer service & language on first hiccup — never flash an error box
+                        preferSystemFallbackService = !preferSystemFallbackService
+                        if (error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT) {
+                            forceEnglishLocaleFallback = true
+                        }
+                        _lastError.value = null
+                        _statusHint.value = "মাইক রিকানেক্ট হচ্ছে..."
+                    } else {
+                        // Persistent SpeechRecognizer failure: auto-open official Google Voice Popup instead of leaving an error
                         mainHandler.post {
                             destroyRecognizerInternal()
                             _isMicLockedOn.value = false
-                            _voiceState.value = VoiceState.ERROR
+                            _voiceState.value = VoiceState.IDLE
                             WakeWordForegroundService.resume(context)
-                            onFallbackToSystemDialog?.invoke()
+                            if (onFallbackToSystemDialog != null) {
+                                _lastError.value = null
+                                _statusHint.value = "Google Voice ডায়ালগ ওপেন হচ্ছে..."
+                                onFallbackToSystemDialog?.invoke()
+                            } else {
+                                _voiceState.value = VoiceState.ERROR
+                                _lastError.value = errText
+                                _statusHint.value = errText
+                                activeOnError?.invoke(errText)
+                            }
                         }
                         return
                     }
 
                     val retryDelay = when (error) {
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 700L
-                        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
-                            forceEnglishLocaleFallback = true
-                            800L
-                        }
-                        else -> 650L
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 600L
+                        else -> 400L
                     }
 
                     mainHandler.post {
@@ -486,17 +517,9 @@ class NativeVoiceController(
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, targetLocale)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, targetLocale)
-                putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("bn-BD", "en-US", "bn-IN"))
-                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1800L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1400L)
-                if (activePreferOffline) {
-                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                }
             }
 
             recognizer = sr
@@ -508,8 +531,19 @@ class NativeVoiceController(
             }.onFailure { err ->
                 mainHandler.removeCallbacks(readyWatchdogRunnable)
                 Log.w(TAG, "sr.startListening threw: ${err.message}")
-                _lastError.value = "মাইক চালু সমস্যা: ${err.localizedMessage ?: "Retry"}"
-                mainHandler.postDelayed(restartListeningRunnable, 600L)
+                if (!preferSystemFallbackService) {
+                    preferSystemFallbackService = true
+                    _lastError.value = null
+                    _statusHint.value = "মাইক রিকানেক্ট হচ্ছে..."
+                    mainHandler.postDelayed(restartListeningRunnable, 350L)
+                } else if (onFallbackToSystemDialog != null) {
+                    _lastError.value = null
+                    _isMicLockedOn.value = false
+                    _voiceState.value = VoiceState.IDLE
+                    onFallbackToSystemDialog?.invoke()
+                } else {
+                    _lastError.value = "মাইক চালু সমস্যা: ${err.localizedMessage ?: "Retry"}"
+                }
             }
         }
     }
