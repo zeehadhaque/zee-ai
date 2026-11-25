@@ -106,30 +106,30 @@ class NativePhoneCommander(private val context: Context) {
 
     fun adjustVolume(action: String): String {
         val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            ?: return "Audio manager pawa jayni."
+            ?: return "অডিও ম্যানেজার পাওয়া যায়নি বস।"
         return try {
             when (action) {
                 "up" -> {
                     am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
-                    "Volume bariye diyechi, boss."
+                    "ভলিউম বাড়িয়ে দিয়েছি বস।"
                 }
                 "down" -> {
                     am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-                    "Volume komiye diyechi, boss."
+                    "ভলিউম কমিয়ে দিয়েছি বস।"
                 }
                 "mute" -> {
                     am.setStreamVolume(AudioManager.STREAM_MUSIC, 0, AudioManager.FLAG_SHOW_UI)
-                    "Volume mute kore diyechi, boss."
+                    "ভলিউম মিউট করে দিয়েছি বস।"
                 }
                 "max" -> {
                     val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     am.setStreamVolume(AudioManager.STREAM_MUSIC, max, AudioManager.FLAG_SHOW_UI)
-                    "Volume 100% full kore diyechi, boss."
+                    "ভলিউম ফুল করে দিয়েছি বস।"
                 }
-                else -> "Volume command bujhte parini boss."
+                else -> "ভলিউম কমান্ড বুঝতে পারিনি বস।"
             }
         } catch (_: Exception) {
-            "Volume change kora jayni boss."
+            "ভলিউম পরিবর্তন করা যায়নি বস।"
         }
     }
 
@@ -181,7 +181,7 @@ class NativePhoneCommander(private val context: Context) {
             Regex("""(?:koyta|koita|কয়টা|কয়টা)\s+(?:baje|বাজে)""").containsMatchIn(lower)
         ) {
             val now = SimpleDateFormat("hh:mm a, EEEE, dd MMM", Locale.getDefault()).format(Date())
-            return PhoneCommandOutcome.Executed("Ekhon baje $now, boss.")
+            return PhoneCommandOutcome.Executed("এখন বাজে $now, বস।")
         }
 
         if (hasAnyTerm(lower, "battery", "ব্যাটারি", "চার্জ", "charge") &&
@@ -190,7 +190,7 @@ class NativePhoneCommander(private val context: Context) {
         ) {
             val pct = getBatteryPercent()
             return PhoneCommandOutcome.Executed(
-                if (pct >= 0) "Phone-e ekhon $pct% battery charge ache boss." else "Battery level check kora jayni boss."
+                if (pct >= 0) "ফোনে এখন $pct শতাংশ চার্জ আছে বস।" else "ব্যাটারি লেভেল চেক করা যায়নি বস।"
             )
         }
 
@@ -205,10 +205,10 @@ class NativePhoneCommander(private val context: Context) {
             }
             return if (ok) {
                 PhoneCommandOutcome.Executed(
-                    if (isTorchOn) "Flashlight chalu kore diyechi boss." else "Flashlight bondho kore diyechi boss."
+                    if (isTorchOn) "ফ্ল্যাশলাইট চালু করে দিয়েছি বস।" else "ফ্ল্যাশলাইট বন্ধ করে দিয়েছি বস।"
                 )
             } else {
-                PhoneCommandOutcome.Executed("Flashlight toggle kora jayni boss (camera onno app-e busy thakte pare).")
+                PhoneCommandOutcome.Executed("ফ্ল্যাশলাইট অন করা যায়নি বস।")
             }
         }
 
@@ -240,34 +240,34 @@ class NativePhoneCommander(private val context: Context) {
                 context.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 true
             }.getOrDefault(false)
-            return PhoneCommandOutcome.Executed(if (ok) "Wi-Fi connectivity panel open kore diyechi boss." else "Wi-Fi settings khola jayni boss.")
+            return PhoneCommandOutcome.Executed(if (ok) "ওয়াইফাই কানেকশন প্যানেল খুলে দিয়েছি বস।" else "ওয়াইফাই সেটিংস খোলা যায়নি বস।")
         }
         if (hasAnyTerm(lower, "bluetooth", "ব্লুটুথ")) {
             val ok = runCatching {
                 context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 true
             }.getOrDefault(false)
-            return PhoneCommandOutcome.Executed(if (ok) "Bluetooth settings open kore diyechi boss." else "Bluetooth settings khola jayni boss.")
+            return PhoneCommandOutcome.Executed(if (ok) "ব্লুটুথ সেটিংস খুলে দিয়েছি বস।" else "ব্লুটুথ সেটিংস খোলা যায়নি বস।")
         }
         if (hasAnyTerm(lower, "brightness", "ব্রাইটনেস", "display settings")) {
             val ok = runCatching {
                 context.startActivity(Intent(Settings.ACTION_DISPLAY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 true
             }.getOrDefault(false)
-            return PhoneCommandOutcome.Executed(if (ok) "Display brightness settings khule diyechi boss." else "Display settings khola jayni boss.")
+            return PhoneCommandOutcome.Executed(if (ok) "ডিসপ্লে ব্রাইটনেস সেটিংস খুলে দিয়েছি বস।" else "ডিসপ্লে সেটিংস খোলা যায়নি বস।")
         }
         if (lower == "settings" || lower == "open settings" || hasAnyTerm(lower, "সেটিংস")) {
             val ok = runCatching {
                 context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 true
             }.getOrDefault(false)
-            return PhoneCommandOutcome.Executed(if (ok) "Phone settings open kore diyechi boss." else "Settings khola jayni boss.")
+            return PhoneCommandOutcome.Executed(if (ok) "ফোন সেটিংস খুলে দিয়েছি বস।" else "সেটিংস খোলা যায়নি বস।")
         }
 
         // 2c. Media Playback Controls (Works natively on YouTube / Spotify / Reels)
         if (hasAnyTerm(lower, "skip ad", "skip", "অ্যাড স্কিপ", "স্কিপ")) {
             val ok = runAccessibilityAction("SKIP_AD") { it.skipAdIfPresent() }
-            if (ok == true) return PhoneCommandOutcome.Executed("Ad skip kore diyechi boss.")
+            if (ok == true) return PhoneCommandOutcome.Executed("অ্যাড স্কিপ করে দিয়েছি বস।")
         }
         if (hasAnyTerm(lower, "next video", "next reel", "next short", "porer video", "পরের ভিডিও", "arekta")) {
             val fg = ZeeAccessibilityService.currentForegroundPackage()
@@ -276,7 +276,7 @@ class NativePhoneCommander(private val context: Context) {
             } else {
                 dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
             }
-            return PhoneCommandOutcome.Executed(if (handled) "Next item play korechi boss." else "Next kora jayni boss.")
+            return PhoneCommandOutcome.Executed(if (handled) "পরের ভিডিও প্লে করেছি বস।" else "পরবর্তী আইটেমে যাওয়া যায়নি বস।")
         }
         if (hasAnyTerm(lower, "previous video", "ager video", "আগের ভিডিও")) {
             val fg = ZeeAccessibilityService.currentForegroundPackage()
@@ -285,14 +285,14 @@ class NativePhoneCommander(private val context: Context) {
             } else {
                 dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
             }
-            return PhoneCommandOutcome.Executed(if (handled) "Previous video te gelam boss." else "Previous kora jayni boss.")
+            return PhoneCommandOutcome.Executed(if (handled) "আগের ভিডিওতে গেলাম বস।" else "আগের ভিডিওতে যাওয়া যায়নি বস।")
         }
         if (lower in listOf("pause", "pause video", "stop video", "stop song", "play", "resume", "resume video", "পজ", "থামাও", "প্লে করো")) {
             val keySent = dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
             val accClicked = ZeeAccessibilityService.getInstance()?.let {
                 it.clickNodeContainingText("pause") || it.clickNodeContainingText("play")
             } ?: false
-            return PhoneCommandOutcome.Executed(if (keySent || accClicked) "Media play/pause kore diyechi boss." else "Media control kora jayni boss.")
+            return PhoneCommandOutcome.Executed(if (keySent || accClicked) "মিডিয়া প্লে পজ করে দিয়েছি বস।" else "মিডিয়া কন্ট্রোল করা যায়নি বস।")
         }
 
         // 2d. YouTube Direct Search & Auto-Play ("yt e natok search koro", "youtube play lo-fi", "ইউটিউবে গান চালাও")
@@ -312,7 +312,7 @@ class NativePhoneCommander(private val context: Context) {
                     ZeeAccessibilityService.sendControlCommand(context, "YT_PLAY_FIRST", "1900")
                 }
                 return PhoneCommandOutcome.Executed(
-                    if (ok) "YouTube-e '$ytQuery' search kore diyechi boss." else "YouTube open kora jayni boss."
+                    if (ok) "ইউটিউবে '$ytQuery' সার্চ করে দিয়েছি বস।" else "ইউটিউব খোলা যায়নি বস।"
                 )
             }
         }
@@ -328,7 +328,7 @@ class NativePhoneCommander(private val context: Context) {
             if (googleQuery.isNotBlank()) {
                 val ok = openGoogleSearch(googleQuery)
                 return PhoneCommandOutcome.Executed(
-                    if (ok) "Google-e '$googleQuery' search kore diyechi boss." else "Browser open kora jayni boss."
+                    if (ok) "গুগলে '$googleQuery' সার্চ করে দিয়েছি বস।" else "ব্রাউজার খোলা যায়নি বস।"
                 )
             }
         }
@@ -340,7 +340,7 @@ class NativePhoneCommander(private val context: Context) {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(domainUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 true
             }.getOrDefault(false)
-            if (ok) return PhoneCommandOutcome.Executed("${m.groupValues[1]} browser-e khule diyechi boss.")
+            if (ok) return PhoneCommandOutcome.Executed("${m.groupValues[1]} ব্রাউজারে খুলে দিয়েছি বস।")
         }
 
         // 3. Post Story OR Feed Post ("facebook e post koro ...", "post ...", "story post")
@@ -353,17 +353,17 @@ class NativePhoneCommander(private val context: Context) {
             return if (isInstagram) {
                 launchApp("com.instagram.android")
                 ZeeAccessibilityService.sendControlCommand(context, "OPEN_STORY")
-                PhoneCommandOutcome.Executed("Instagram Story creator open kore diyechi boss.")
+                PhoneCommandOutcome.Executed("ইনস্টাগ্রাম স্টোরি খুলে দিয়েছি বস।")
             } else if (isFacebook) {
                 launchApp("com.facebook.katana")
                 ZeeAccessibilityService.sendControlCommand(context, "OPEN_STORY")
-                PhoneCommandOutcome.Executed("Facebook Story creator open kore diyechi boss.")
+                PhoneCommandOutcome.Executed("ফেসবুক স্টোরি খুলে দিয়েছি বস।")
             } else {
                 val launched = launchApp("com.instagram.android") || launchApp("com.facebook.katana")
                 ZeeAccessibilityService.sendControlCommand(context, "OPEN_STORY")
                 PhoneCommandOutcome.Executed(
-                    if (launched) "Story posting creator open kore diyechi boss."
-                    else "Story post korte Instagram ba Facebook app pawa jayni boss."
+                    if (launched) "স্টোরি ক্রিয়েটর খুলে দিয়েছি বস।"
+                    else "স্টোরি পোস্ট করার জন্য ইনস্টাগ্রাম বা ফেসবুক অ্যাপ পাওয়া যায়নি বস।"
                 )
             }
         }
@@ -384,19 +384,19 @@ class NativePhoneCommander(private val context: Context) {
                     ZeeAccessibilityService.sendControlCommand(context, "FB_POST", postBody)
                 }
                 PhoneCommandOutcome.Executed(
-                    if (ok && postBody.isNotBlank()) "Facebook-e '$postBody' post ready kore diyechi boss."
-                    else if (ok) "Facebook post box open korechi boss."
-                    else "Facebook app pawa jayni boss."
+                    if (ok && postBody.isNotBlank()) "ফেসবুকে '$postBody' পোস্ট রেডি করে দিয়েছি বস।"
+                    else if (ok) "ফেসবুক পোস্ট বক্স খুলে দিয়েছি বস।"
+                    else "ফেসবুক অ্যাপ পাওয়া যায়নি বস।"
                 )
             } else {
                 if (postBody.isNotBlank()) {
                     val ok = runAccessibilityAction("TYPE_AND_POST", postBody) { it.autoTypeAndSend(postBody, isPostOrComment = true) }
-                        ?: return PhoneCommandOutcome.Executed("Post korte Accessibility ON kore dao boss.")
-                    PhoneCommandOutcome.Executed(if (ok) "Post type kore publish korechi boss." else "Active post box pawa jayni boss.")
+                        ?: return PhoneCommandOutcome.Executed("পোস্ট করতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+                    PhoneCommandOutcome.Executed(if (ok) "পোস্ট লিখে পাবলিশ করে দিয়েছি বস।" else "অ্যাক্টিভ পোস্ট বক্স পাওয়া যায়নি বস।")
                 } else {
                     runAccessibilityAction("CLICK_POST") { it.autoClickPostAfterDelay(50L); true }
-                        ?: return PhoneCommandOutcome.Executed("Post button click korte Accessibility ON kore dao boss.")
-                    PhoneCommandOutcome.Executed("Post button press kore diyechi boss.")
+                        ?: return PhoneCommandOutcome.Executed("পোস্ট বাটনে চাপতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+                    PhoneCommandOutcome.Executed("পোস্ট বাটন প্রেস করে দিয়েছি বস।")
                 }
             }
         }
@@ -436,7 +436,7 @@ class NativePhoneCommander(private val context: Context) {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 })
                 ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "1000")
-                return PhoneCommandOutcome.Executed("WhatsApp-e $digits ke '$payload' pathiye dichi boss.")
+                return PhoneCommandOutcome.Executed("হোয়াটসঅ্যাপে $digits নম্বরে '$payload' পাঠিয়ে দিচ্ছি বস।")
             } else if (targetName.isNotBlank()) {
                 val phone = findContactPhoneNumber(targetName)
                 val payload = extractedBody.ifBlank { "Assalamu Alaikum!" }
@@ -447,19 +447,19 @@ class NativePhoneCommander(private val context: Context) {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     })
                     ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "1000")
-                    return PhoneCommandOutcome.Executed("WhatsApp-e $targetName ($phone) ke message pathiye dichi boss.")
+                    return PhoneCommandOutcome.Executed("হোয়াটসঅ্যাপে $targetName কে মেসেজ পাঠিয়ে দিচ্ছি বস।")
                 } else {
                     launchApp("com.whatsapp")
                     ZeeAccessibilityService.sendControlCommand(context, "SEARCH_IN_APP", targetName)
-                    return PhoneCommandOutcome.Executed("WhatsApp open kore '$targetName' khuje dichi boss.")
+                    return PhoneCommandOutcome.Executed("হোয়াটসঅ্যাপ খুলে '$targetName' খুঁজে দিচ্ছি বস।")
                 }
             } else if (extractedBody.isNotBlank() && ZeeAccessibilityService.currentForegroundPackage() == "com.whatsapp") {
                 val ok = runAccessibilityAction("TYPE_AND_SEND", extractedBody) { it.autoTypeAndSend(extractedBody) }
-                    ?: return PhoneCommandOutcome.Executed("WhatsApp message send korte Accessibility ON koro boss.")
-                return PhoneCommandOutcome.Executed(if (ok) "WhatsApp-e '$extractedBody' pathiye diyechi boss." else "Chat box khola thakle abar bolo boss.")
+                    ?: return PhoneCommandOutcome.Executed("হোয়াটসঅ্যাপে মেসেজ পাঠাতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+                return PhoneCommandOutcome.Executed(if (ok) "হোয়াটসঅ্যাপে '$extractedBody' পাঠিয়ে দিয়েছি বস।" else "চ্যাট বক্স খোলা রেখে আবার বলুন বস।")
             } else if (hasAnyTerm(lower, "message", "msg", "pathao", "chat", "পাঠাও")) {
                 launchApp("com.whatsapp")
-                return PhoneCommandOutcome.Executed("WhatsApp open korechi boss. Chat select korlei message pathate parbe.")
+                return PhoneCommandOutcome.Executed("হোয়াটসঅ্যাপ খুলে দিয়েছি বস, চ্যাট সিলেক্ট করলে মেসেজ পাঠাতে পারব।")
             }
         }
 
@@ -475,7 +475,7 @@ class NativePhoneCommander(private val context: Context) {
             if (textToExtract.isNotBlank() && ZeeAccessibilityService.isServiceEnabled(context)) {
                 ZeeAccessibilityService.sendControlCommand(context, "TYPE_AND_SEND", textToExtract)
             }
-            return PhoneCommandOutcome.Executed("Messenger inbox open kore diyechi boss.")
+            return PhoneCommandOutcome.Executed("মেসেঞ্জার ইনবক্স খুলে দিয়েছি বস।")
         }
 
         if (hasAnyTerm(lower, "sms", "text message", "message", "msg", "মেসেজ") &&
@@ -493,13 +493,13 @@ class NativePhoneCommander(private val context: Context) {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 })
                 ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "900")
-                return PhoneCommandOutcome.Executed("$digits nambore SMS ready korechi boss.")
+                return PhoneCommandOutcome.Executed("$digits নম্বরে এসএমএস রেডি করেছি বস।")
             }
             val fg = ZeeAccessibilityService.currentForegroundPackage()
             if (fg.isNotBlank() && fg != context.packageName && cleanedSms.isNotBlank()) {
                 val ok = runAccessibilityAction("TYPE_AND_SEND", cleanedSms) { it.autoTypeAndSend(cleanedSms) }
-                    ?: return PhoneCommandOutcome.Executed("Chat-e message pathate Accessibility ON kore dao boss.")
-                return PhoneCommandOutcome.Executed(if (ok) "Active chat-e '$cleanedSms' pathiye diyechi boss." else "Active chat input box pawa jayni boss.")
+                    ?: return PhoneCommandOutcome.Executed("চ্যাটে মেসেজ পাঠাতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+                return PhoneCommandOutcome.Executed(if (ok) "অ্যাক্টিভ চ্যাটে '$cleanedSms' পাঠিয়ে দিয়েছি বস।" else "অ্যাক্টিভ চ্যাট ইনপুট বক্স পাওয়া যায়নি বস।")
             }
         }
 
@@ -507,15 +507,15 @@ class NativePhoneCommander(private val context: Context) {
         Regex("""^(?:click|tap|press|চাপো|ক্লিক\s*করো|ট্যাপ\s*করো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let { m ->
             val targetLabel = m.groupValues[1].trim()
             val ok = runAccessibilityAction("CLICK_TEXT", targetLabel) { it.clickNodeContainingText(targetLabel) }
-                ?: return PhoneCommandOutcome.Executed("Screen click korte Phone Control tab theke Accessibility ON kore dao boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "'$targetLabel'-e tap kore diyechi boss." else "'$targetLabel' screen-e khuje pawa jayni boss.")
+                ?: return PhoneCommandOutcome.Executed("স্ক্রিনে ক্লিক করতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "'$targetLabel' এ ট্যাপ করে দিয়েছি বস।" else "স্ক্রিনে '$targetLabel' খুঁজে পাওয়া যায়নি বস।")
         }
 
         // Instant "Send" button tap inside open chat
         if (lower in listOf("send", "send koro", "পাঠাও", "পাঠিয়ে দাও", "পাঠিয়ে দাও")) {
             runAccessibilityAction("CLICK_SEND", "50") { it.autoClickSendAfterDelay(50L); true }
-                ?: return PhoneCommandOutcome.Executed("Send button click korte Accessibility ON koro boss.")
-            return PhoneCommandOutcome.Executed("Send button press kore diyechi boss.")
+                ?: return PhoneCommandOutcome.Executed("সেন্ড বাটনে চাপতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+            return PhoneCommandOutcome.Executed("সেন্ড বাটন প্রেস করে দিয়েছি বস।")
         }
 
         // Type & Send ("type and send ...", "chat ...", "reply ...", "likhe pathao ...")
@@ -523,10 +523,10 @@ class NativePhoneCommander(private val context: Context) {
             val toType = m.groupValues[1].trim()
             if (toType.isNotBlank()) {
                 val ok = runAccessibilityAction("TYPE_AND_SEND", toType) { it.autoTypeAndSend(toType) }
-                    ?: return PhoneCommandOutcome.Executed("Auto-send korte Accessibility ON kore dao boss.")
+                    ?: return PhoneCommandOutcome.Executed("অটো সেন্ড করতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
                 return PhoneCommandOutcome.Executed(
-                    if (ok) "Active inbox-e '$toType' type kore send kore diyechi boss."
-                    else "Active kono chat input box pawa jayni boss."
+                    if (ok) "ইনবক্সে '$toType' লিখে পাঠিয়ে দিয়েছি বস।"
+                    else "কোনো চ্যাট ইনপুট বক্স পাওয়া যায়নি বস।"
                 )
             }
         }
@@ -535,8 +535,8 @@ class NativePhoneCommander(private val context: Context) {
         Regex("""^(?:type|write|text likho|txt likho|likho|lekh|লিখো|লেখো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let { m ->
             val payload = m.groupValues[1].trim()
             val ok = runAccessibilityAction("TYPE_TEXT", payload) { it.typeTextIntoFocusedField(payload) }
-                ?: return PhoneCommandOutcome.Executed("Type korte Accessibility permission ON thakte hobe boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "'$payload' text box-e likhe diyechi boss." else "Active kono text box pawa jayni boss.")
+                ?: return PhoneCommandOutcome.Executed("টাইপ করতে অ্যাক্সেসিবিলিটি চালু থাকতে হবে বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "'$payload' টেক্সট বক্সে লিখে দিয়েছি বস।" else "কোনো টেক্সট বক্স পাওয়া যায়নি বস।")
         }
 
         // In-App Find / Search OR Fallback to Google Web Search
@@ -554,10 +554,10 @@ class NativePhoneCommander(private val context: Context) {
                     } else {
                         ZeeAccessibilityService.sendControlCommand(context, "SEARCH_IN_APP", query)
                     }
-                    PhoneCommandOutcome.Executed("Active app-e '$query' search/find kore dichi boss.")
+                    PhoneCommandOutcome.Executed("অ্যাপের ভেতর '$query' খুঁজে দিচ্ছি বস।")
                 } else {
                     val ok = openGoogleSearch(query)
-                    PhoneCommandOutcome.Executed(if (ok) "Google-e '$query' search kore diyechi boss." else "Search open kora jayni boss.")
+                    PhoneCommandOutcome.Executed(if (ok) "গুগলে '$query' সার্চ করে দিয়েছি বস।" else "সার্চ ওপেন করা যায়নি বস।")
                 }
             }
         }
@@ -565,23 +565,23 @@ class NativePhoneCommander(private val context: Context) {
         // Expanded Scroll Variants (Down / Up / Left / Right)
         if (hasAnyTerm(lower, "scroll up", "upore scroll", "upore jao", "upore utho", "উপরে স্ক্রল", "উপরে যাও")) {
             val ok = runAccessibilityAction("SCROLL", "UP") { it.swipeDirection("UP") }
-                ?: return PhoneCommandOutcome.Executed("Scroll korte Accessibility permission ON kore dao boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Screen upore scroll kore diyechi boss." else "Scroll kora jayni boss.")
+                ?: return PhoneCommandOutcome.Executed("স্ক্রল করতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "স্ক্রিন উপরে স্ক্রল করে দিয়েছি বস।" else "স্ক্রল করা যায়নি বস।")
         }
         if (hasAnyTerm(lower, "scroll left", "swipe left", "বামে স্ক্রল")) {
             val ok = runAccessibilityAction("SCROLL", "LEFT") { it.swipeDirection("LEFT") }
-                ?: return PhoneCommandOutcome.Executed("Scroll korte Accessibility permission ON kore dao boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Screen left swipe korechi boss." else "Swipe failed boss.")
+                ?: return PhoneCommandOutcome.Executed("স্ক্রল করতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "স্ক্রিন বামে সোয়াইপ করেছি বস।" else "সোয়াইপ করা যায়নি বস।")
         }
         if (hasAnyTerm(lower, "scroll right", "swipe right", "ডানে স্ক্রল")) {
             val ok = runAccessibilityAction("SCROLL", "RIGHT") { it.swipeDirection("RIGHT") }
-                ?: return PhoneCommandOutcome.Executed("Scroll korte Accessibility permission ON kore dao boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Screen right swipe korechi boss." else "Swipe failed boss.")
+                ?: return PhoneCommandOutcome.Executed("স্ক্রল করতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "স্ক্রিন ডানে সোয়াইপ করেছি বস।" else "সোয়াইপ করা যায়নি বস।")
         }
         if (lower == "scroll" || lower == "স্ক্রল" || hasAnyTerm(lower, "scroll down", "niche scroll", "niche jao", "niche namo", "scroll more", "নিচে স্ক্রল", "নিচে যাও")) {
             val ok = runAccessibilityAction("SCROLL", "DOWN") { it.swipeDirection("DOWN") }
-                ?: return PhoneCommandOutcome.Executed("Scroll korte Accessibility permission ON kore dao boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Screen niche scroll kore diyechi boss." else "Scroll kora jayni boss.")
+                ?: return PhoneCommandOutcome.Executed("স্ক্রল করতে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "স্ক্রিন নিচে স্ক্রল করে দিয়েছি বস।" else "স্ক্রল করা যায়নি বস।")
         }
 
         // 7. Phone Calls ("call 017xxxxxxxx", "call Abba", "Rahim ke call dao", "ফোন করো")
@@ -595,7 +595,7 @@ class NativePhoneCommander(private val context: Context) {
                 }
                 context.startActivity(intent)
                 ZeeAccessibilityService.sendControlCommand(context, "CLICK_CALL", "500")
-                return PhoneCommandOutcome.Executed("$digits dialer-e open kore diyechi boss.")
+                return PhoneCommandOutcome.Executed("$digits নম্বর ডায়ালারে ওপেন করে দিয়েছি বস।")
             } else {
                 val targetName = text
                     .replace(Regex("""(?i)(?:^|\s)(?:call|dial|phone|koro|dao|ke|amake|ফোন|কল|করো|দাও|কে|ডায়াল|ডায়াল)(?=\s|$)"""), " ")
@@ -606,7 +606,7 @@ class NativePhoneCommander(private val context: Context) {
                     if (!hasContactsPerm) {
                         val intent = Intent(Intent.ACTION_DIAL).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                         context.startActivity(intent)
-                        return PhoneCommandOutcome.Executed("Contacts permission dewa nei boss, tai dialer open korechi.")
+                        return PhoneCommandOutcome.Executed("কন্টাক্ট পারমিশন দেওয়া নেই বস, তাই ডায়ালার খুলে দিয়েছি।")
                     }
                     val phone = findContactPhoneNumber(targetName)
                     if (phone != null) {
@@ -615,11 +615,11 @@ class NativePhoneCommander(private val context: Context) {
                         }
                         context.startActivity(intent)
                         ZeeAccessibilityService.sendControlCommand(context, "CLICK_CALL", "500")
-                        return PhoneCommandOutcome.Executed("$targetName ($phone) ke call dial kore diyechi boss.")
+                        return PhoneCommandOutcome.Executed("$targetName কে কল ডায়াল করে দিয়েছি বস।")
                     } else {
                         val intent = Intent(Intent.ACTION_DIAL).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                         context.startActivity(intent)
-                        return PhoneCommandOutcome.Executed("$targetName phone contacts-e pawa jayni boss, dialer open korechi.")
+                        return PhoneCommandOutcome.Executed("$targetName কন্টাক্টসে পাওয়া যায়নি বস, ডায়ালার খুলে দিয়েছি।")
                     }
                 }
             }
@@ -628,13 +628,13 @@ class NativePhoneCommander(private val context: Context) {
         // 8. Screenshot & Lock Screen
         if (hasAnyTerm(lower, "screenshot", "screen shot", "স্ক্রিনশট")) {
             val ok = runAccessibilityAction("NAV", "SCREENSHOT") { it.navigate("screenshot") }
-                ?: return PhoneCommandOutcome.Executed("Screenshot nite Phone Control theke Accessibility permission ON korte hobe boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Screenshot niye niyechi boss." else "Screenshot action failed boss.")
+                ?: return PhoneCommandOutcome.Executed("স্ক্রিনশট নিতে অ্যাক্সেসিবিলিটি চালু করতে হবে বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "স্ক্রিনশট নিয়ে নিয়েছি বস।" else "স্ক্রিনশট নেওয়া যায়নি বস।")
         }
         if (lower.contains("lock phone") || lower.contains("lock screen") || lower.contains("phone lock") || lower.contains("screen lock") || lower.contains("স্ক্রিন লক") || lower.contains("ফোন লক")) {
             val ok = runAccessibilityAction("NAV", "LOCK") { it.navigate("lock") }
-                ?: return PhoneCommandOutcome.Executed("Phone lock korte Accessibility permission ON thakte hobe boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Phone lock kore diyechi boss." else "Lock action failed boss.")
+                ?: return PhoneCommandOutcome.Executed("ফোন লক করতে অ্যাক্সেসিবিলিটি চালু থাকতে হবে বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "ফোন লক করে দিয়েছি বস।" else "ফোন লক করা যায়নি বস।")
         }
 
         // 9. Read Screen Text
@@ -645,37 +645,37 @@ class NativePhoneCommander(private val context: Context) {
             if (service != null) {
                 val screenText = service.readActiveScreenText(1400)
                 return PhoneCommandOutcome.Executed(
-                    if (screenText.isBlank()) "Screen-e readable kono text pawa jayni boss."
-                    else "Screen-e ja dekha jachhe boss:\n$screenText"
+                    if (screenText.isBlank()) "স্ক্রিনে পড়ার মতো কোনো টেক্সট পাওয়া যায়নি বস।"
+                    else "স্ক্রিনে যা দেখা যাচ্ছে বস:\n$screenText"
                 )
             }
             if (!ZeeAccessibilityService.isServiceEnabled(context)) {
-                return PhoneCommandOutcome.Executed("Screen porte Phone Control tab theke Accessibility ON kore dao boss.")
+                return PhoneCommandOutcome.Executed("স্ক্রিন পড়তে অ্যাক্সেসিবিলিটি চালু করে দিন বস।")
             }
             ZeeAccessibilityService.sendControlCommand(context, "SNAPSHOT_SCREEN")
-            return PhoneCommandOutcome.Executed("Screen scan request pathiyechi boss.")
+            return PhoneCommandOutcome.Executed("স্ক্রিন স্ক্যান রিকোয়েস্ট পাঠিয়েছি বস।")
         }
 
         // 10. Navigation (Back / Home / Recents / Notifications)
         if (lower == "back" || lower.contains("go back") || lower.contains("back jao") || lower.contains("পিছনে যাও") || lower.contains("পিছে যাও") || lower.contains("ব্যাকে যাও") || lower == "ব্যাক") {
             val ok = runAccessibilityAction("NAV", "BACK") { it.navigate("back") }
-                ?: return PhoneCommandOutcome.Executed("Back jete Accessibility permission ON nei boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Back gelam boss." else "Back action failed boss.")
+                ?: return PhoneCommandOutcome.Executed("ব্যাক করতে অ্যাক্সেসিবিলিটি চালু নেই বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "ব্যাকে গেলাম বস।" else "ব্যাক করা যায়নি বস।")
         }
         if (lower == "home" || lower.contains("go home") || lower.contains("home screen") || lower.contains("হোমে যাও") || lower.contains("হোম স্ক্রিন") || lower == "হোম") {
             val ok = runAccessibilityAction("NAV", "HOME") { it.navigate("home") }
-                ?: return PhoneCommandOutcome.Executed("Home screen-e jete Accessibility permission ON nei boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Home screen-e niye gelam boss." else "Home action failed boss.")
+                ?: return PhoneCommandOutcome.Executed("হোমে যেতে অ্যাক্সেসিবিলিটি চালু নেই বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "হোম স্ক্রিনে নিয়ে গেলাম বস।" else "হোম স্ক্রিনে যাওয়া যায়নি বস।")
         }
         if (hasAnyTerm(lower, "recents", "recent", "recent apps", "রিসেন্ট", "রিসেন্ট অ্যাপস")) {
             val ok = runAccessibilityAction("NAV", "RECENTS") { it.navigate("recents") }
-                ?: return PhoneCommandOutcome.Executed("Recents open korte Accessibility permission ON nei boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Recent apps open korechi boss." else "Recents failed boss.")
+                ?: return PhoneCommandOutcome.Executed("রিসেন্ট অ্যাপস খুলতে অ্যাক্সেসিবিলিটি চালু নেই বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "রিসেন্ট অ্যাপস খুলে দিয়েছি বস।" else "রিসেন্ট অ্যাপস খোলা যায়নি বস।")
         }
         if (hasAnyTerm(lower, "notifications", "notification", "নোটিফিকেশন")) {
             val ok = runAccessibilityAction("NAV", "NOTIFICATIONS") { it.navigate("notifications") }
-                ?: return PhoneCommandOutcome.Executed("Notifications open korte Accessibility permission ON nei boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Notification panel open korechi boss." else "Notifications failed boss.")
+                ?: return PhoneCommandOutcome.Executed("নোটিফিকেশন খুলতে অ্যাক্সেসিবিলিটি চালু নেই বস।")
+            return PhoneCommandOutcome.Executed(if (ok) "নোটিফিকেশন প্যানেল খুলে দিয়েছি বস।" else "নোটিফিকেশন খোলা যায়নি বস।")
         }
 
         // 11. Open Installed Apps (Prefix OR Suffix, English OR Bengali)
@@ -689,14 +689,14 @@ class NativePhoneCommander(private val context: Context) {
             if (query.length in 2..36) {
                 val launched = findAndLaunchApp(query.lowercase())
                 if (launched != null) {
-                    return PhoneCommandOutcome.Executed("Khule diyechi boss, $launched open hoyeche.")
+                    return PhoneCommandOutcome.Executed("খুলে দিয়েছি বস, $launched ওপেন হয়েছে।")
                 }
             }
         }
         if (hasAnyTerm(lower, "open", "kholo", "khulo", "chalu", "chalaw", "start", "launch", "খোলো", "খুলুন", "চালু", "চালাও", "ওপেন")) {
             val launched = findAndLaunchApp(lower)
             if (launched != null) {
-                return PhoneCommandOutcome.Executed("Khule diyechi boss, $launched open hoyeche.")
+                return PhoneCommandOutcome.Executed("খুলে দিয়েছি বস, $launched ওপেন হয়েছে।")
             }
         }
 
@@ -707,14 +707,14 @@ class NativePhoneCommander(private val context: Context) {
             val minute = timeMatch?.groupValues?.get(2)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
             val ok = openAlarmIntent(hour, minute, "ZEE AI Alarm")
             return PhoneCommandOutcome.Executed(
-                if (ok) String.format("%02d:%02d-er alarm screen open korechi boss.", hour, minute)
-                else "Clock app alarm support korche na boss."
+                if (ok) String.format("%02d:%02d এর অ্যালার্ম স্ক্রিন খুলে দিয়েছি বস।", hour, minute)
+                else "ক্লক অ্যাপ অ্যালার্ম সাপোর্ট করছে না বস।"
             )
         }
         if (hasAnyTerm(lower, "timer", "টাইমার")) {
             val mins = Regex("(\\d+)").find(lower)?.groupValues?.get(1)?.toIntOrNull() ?: 5
             val ok = openTimerIntent(mins * 60, "ZEE AI Timer")
-            return PhoneCommandOutcome.Executed(if (ok) "$mins minute-er timer set korechi boss." else "Timer start kora jayni boss.")
+            return PhoneCommandOutcome.Executed(if (ok) "$mins মিনিটের টাইমার সেট করে দিয়েছি বস।" else "টাইমার চালু করা যায়নি বস।")
         }
 
         return PhoneCommandOutcome.NotAPhoneCommand
