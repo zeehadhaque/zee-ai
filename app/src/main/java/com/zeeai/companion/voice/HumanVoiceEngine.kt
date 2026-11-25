@@ -3,12 +3,9 @@ package com.zeeai.companion.voice
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
-import android.media.AudioFormat
 import android.media.AudioManager
-import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.media.PlaybackParams
-import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -44,10 +41,9 @@ data class OnlineVoiceStatusInfo(
 /**
  * 100% Online Human Neural Voice Engine for ZEE (Male) & ZHEE (Female).
  *
- * Cascade (Google Translate robotic TTS permanently removed):
+ * Cascade (Google TTS and all offline robotic voices permanently removed):
  * 1. ElevenLabs Multilingual v2 (Cinema-grade expressive human voice, when API key configured)
  * 2. Microsoft Edge Neural Studio (`bn-BD-PradeepNeural` / `bn-BD-NabanitaNeural` / `AndrewMultilingualNeural` / `AvaMultilingualNeural`, zero-key HD human neural audio)
- * 3. Google Gemini 2.5 Studio Native Audio (`gemini-2.5-flash-preview-tts`, 24kHz PCM Charon/Kore fallback when Edge unavailable & API key present)
  */
 class HumanVoiceEngine(
     private val context: Context,
@@ -75,8 +71,6 @@ class HumanVoiceEngine(
     private var currentJob: Job? = null
     @Volatile
     private var activeMediaPlayer: MediaPlayer? = null
-    @Volatile
-    private var activeAudioTrack: AudioTrack? = null
 
     private val sessionCounter = AtomicLong(0L)
     private val sessionSpeakingActive = AtomicBoolean(false)
@@ -284,110 +278,6 @@ class HumanVoiceEngine(
         }
     }
 
-    /**
-     * Calls Google Gemini 2.5 Studio TTS (`gemini-2.5-flash-preview-tts` with Pro fallback)
-     * and plays the studio 24kHz PCM human audio cleanly through AudioTrack.
-     */
-    private suspend fun tryPlayGeminiStudioTts(
-        text: String,
-        persona: VoicePersona,
-        apiKey: String,
-        mySessionId: Long
-    ): Boolean {
-        val cfg = voiceConfig
-        val voiceName = if (persona == VoicePersona.ZEE_MALE) cfg.geminiMaleVoice else cfg.geminiFemaleVoice
-        val models = listOf("gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts")
-
-        for (modelId in models) {
-            if (!scope.isActive || sessionCounter.get() != mySessionId) return false
-            val played = runCatching {
-                val payload = JSONObject().apply {
-                    put(
-                        "contents",
-                        JSONArray().put(
-                            JSONObject().put(
-                                "parts",
-                                JSONArray().put(JSONObject().put("text", text.take(1500)))
-                            )
-                        )
-                    )
-                    put(
-                        "generationConfig",
-                        JSONObject().apply {
-                            put("responseModalities", JSONArray().put("AUDIO"))
-                            put(
-                                "speechConfig",
-                                JSONObject().put(
-                                    "voiceConfig",
-                                    JSONObject().put(
-                                        "prebuiltVoiceConfig",
-                                        JSONObject().put("voiceName", voiceName)
-                                    )
-                                )
-                            )
-                        }
-                    )
-                }
-
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent?key=${apiKey.trim()}"
-                val req = Request.Builder()
-                    .url(url)
-                    .addHeader("x-goog-api-key", apiKey.trim())
-                    .addHeader("Content-Type", "application/json")
-                    .post(payload.toString().toRequestBody(JSON_MEDIA))
-                    .build()
-
-                apiHttpClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) {
-                        Log.w(TAG, "Gemini TTS ($modelId) HTTP ${resp.code}")
-                        return@runCatching false
-                    }
-                    val bodyStr = resp.body?.string().orEmpty()
-                    val root = JSONObject(bodyStr)
-                    val parts = root.optJSONArray("candidates")
-                        ?.optJSONObject(0)
-                        ?.optJSONObject("content")
-                        ?.optJSONArray("parts")
-                        ?: return@runCatching false
-
-                    var inlineData: JSONObject? = null
-                    for (i in 0 until parts.length()) {
-                        val candidateData = parts.optJSONObject(i)?.optJSONObject("inlineData")
-                        if (candidateData != null && candidateData.optString("data").isNotBlank()) {
-                            inlineData = candidateData
-                            break
-                        }
-                    }
-                    if (inlineData == null) return@runCatching false
-
-                    val mimeType = inlineData.optString("mimeType", "audio/L16;codec=pcm;rate=24000")
-                    val b64 = inlineData.optString("data")
-                    val audioBytes = Base64.decode(b64, Base64.DEFAULT)
-                    if (audioBytes.size < 256 || sessionCounter.get() != mySessionId) {
-                        return@runCatching false
-                    }
-
-                    val sampleRate = Regex("""rate=(\d+)""").find(mimeType)?.groupValues?.get(1)?.toIntOrNull() ?: 24000
-                    if (mimeType.contains("mp3", ignoreCase = true) || mimeType.contains("mpeg", ignoreCase = true) || mimeType.contains("wav", ignoreCase = true)) {
-                        val ext = if (mimeType.contains("wav", ignoreCase = true)) "wav" else "mp3"
-                        val temp = File(appContext.cacheDir, "zee_gem_${System.currentTimeMillis()}.$ext")
-                        temp.writeBytes(audioBytes)
-                        val ok = playMp3File(temp, pitch = 1.0f, speed = 1.0f)
-                        runCatching { temp.delete() }
-                        ok
-                    } else {
-                        playPcm16Bytes(audioBytes, sampleRate, mySessionId)
-                    }
-                }
-            }.getOrElse {
-                Log.w(TAG, "Gemini TTS ($modelId) error: ${it.message}")
-                false
-            }
-            if (played) return true
-        }
-        return false
-    }
-
     private suspend fun tryPlayEdgeNeuralStudio(
         text: String,
         persona: VoicePersona,
@@ -416,62 +306,6 @@ class HumanVoiceEngine(
         }.getOrElse {
             Log.w(TAG, "Edge Neural Studio TTS error: ${it.message}")
             false
-        }
-    }
-
-    private suspend fun playPcm16Bytes(
-        pcmBytes: ByteArray,
-        sampleRate: Int,
-        mySessionId: Long
-    ): Boolean = withContext(Dispatchers.IO) {
-        val alignedSize = pcmBytes.size and 1.inv()
-        if (alignedSize <= 0) return@withContext false
-
-        val minBuf = AudioTrack.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        ).coerceAtLeast(8192)
-
-        val track = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .setBufferSizeInBytes(minBuf)
-            .build()
-
-        activeAudioTrack = track
-        try {
-            track.play()
-            var offset = 0
-            val chunk = 4096
-            while (offset < alignedSize && activeAudioTrack === track && sessionCounter.get() == mySessionId) {
-                val count = minOf(chunk, alignedSize - offset)
-                val written = track.write(pcmBytes, offset, count, AudioTrack.WRITE_BLOCKING)
-                if (written <= 0) break
-                offset += written
-            }
-            if (activeAudioTrack === track) {
-                runCatching { track.stop() }
-            }
-            offset > 0
-        } catch (t: Throwable) {
-            Log.w(TAG, "AudioTrack PCM playback failed: ${t.message}")
-            false
-        } finally {
-            runCatching { track.release() }
-            if (activeAudioTrack === track) activeAudioTrack = null
         }
     }
 
@@ -610,13 +444,6 @@ class HumanVoiceEngine(
     private fun stopPlaybackInternals() {
         currentJob?.cancel()
         currentJob = null
-        val track = activeAudioTrack
-        activeAudioTrack = null
-        runCatching {
-            track?.pause()
-            track?.flush()
-            track?.release()
-        }
         runCatching {
             activeMediaPlayer?.let {
                 if (it.isPlaying) it.stop()
