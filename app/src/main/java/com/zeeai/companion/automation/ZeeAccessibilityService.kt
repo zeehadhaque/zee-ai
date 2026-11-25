@@ -46,6 +46,9 @@ class ZeeAccessibilityService : AccessibilityService() {
 
         fun getInstance(): ZeeAccessibilityService? = instance
 
+        fun currentForegroundPackage(): String =
+            instance?.getForegroundPackageName().orEmpty()
+
         /**
          * Isolated :control process-এ থাকা অবস্থাতেও মেইন অ্যাপ থেকে সঠিকভাবে Enabled স্ট্যাটাস চেক করে
          */
@@ -87,11 +90,19 @@ class ZeeAccessibilityService : AccessibilityService() {
         runCatching {
             when (type.uppercase()) {
                 "NAV" -> handleGlobalNavigation(arg)
-                "SCROLL" -> scrollCurrentScreen(down = arg.equals("DOWN", ignoreCase = true))
+                "SCROLL" -> swipeDirection(arg.uppercase())
                 "CLICK_TEXT" -> clickNodeContainingText(arg)
-                "TYPE_TEXT" -> typeTextIntoFocusedField(arg)
+                "TYPE_TEXT" -> typeTextIntoFocusedField(arg, preferBottomChatBox = true)
+                "TYPE_AND_SEND" -> autoTypeAndSend(arg, isPostOrComment = false)
+                "TYPE_AND_POST" -> autoTypeAndSend(arg, isPostOrComment = true)
+                "SEARCH_IN_APP" -> searchInActiveApp(arg)
+                "FIND_OR_SEARCH" -> findOrSearchOnScreen(arg)
+                "FB_POST" -> prepareFacebookPost(arg)
+                "YT_PLAY_FIRST" -> autoClickFirstYouTubeResult(arg.toLongOrNull() ?: 1800L)
+                "SKIP_AD" -> skipAdIfPresent()
                 "OPEN_STORY" -> openStoryCreator()
-                "CLICK_SEND" -> autoClickSendAfterDelay(arg.toLongOrNull() ?: 900L)
+                "CLICK_SEND" -> autoClickSendAfterDelay(arg.toLongOrNull() ?: 750L)
+                "CLICK_POST" -> autoClickPostAfterDelay(arg.toLongOrNull() ?: 750L)
                 "CLICK_CALL" -> autoClickCallAfterDelay(arg.toLongOrNull() ?: 500L)
                 "CLICK_XY" -> {
                     val parts = arg.split("|")
@@ -326,7 +337,20 @@ class ZeeAccessibilityService : AccessibilityService() {
         return current != null && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }
 
-    fun scrollCurrentScreen(down: Boolean): Boolean {
+    fun scrollCurrentScreen(down: Boolean): Boolean =
+        swipeDirection(if (down) "DOWN" else "UP")
+
+    fun swipeDirection(direction: String): Boolean {
+        val dir = direction.uppercase()
+        if (dir == "LEFT" || dir == "RIGHT") {
+            val metrics = resources.displayMetrics
+            val y = metrics.heightPixels * 0.5f
+            val sx = if (dir == "LEFT") metrics.widthPixels * 0.80f else metrics.widthPixels * 0.20f
+            val ex = if (dir == "LEFT") metrics.widthPixels * 0.20f else metrics.widthPixels * 0.80f
+            return swipeCoords(sx, y, ex, y, 280L)
+        }
+
+        val down = dir != "UP"
         val root = findBestForegroundWindowRoot()
         if (root != null) {
             val action = if (down) {
@@ -345,47 +369,308 @@ class ZeeAccessibilityService : AccessibilityService() {
             if (walk(root, 0)) return true
         }
 
-        // Fallback: dispatch physical swipe gesture for Compose/WebView/Reels UIs
         val metrics = resources.displayMetrics
         val x = metrics.widthPixels * 0.5f
-        val startY = if (down) metrics.heightPixels * 0.72f else metrics.heightPixels * 0.30f
-        val endY = if (down) metrics.heightPixels * 0.28f else metrics.heightPixels * 0.75f
-        return swipeCoords(x, startY, x, endY, 320L)
+        val startY = if (down) metrics.heightPixels * 0.74f else metrics.heightPixels * 0.28f
+        val endY = if (down) metrics.heightPixels * 0.26f else metrics.heightPixels * 0.74f
+        return swipeCoords(x, startY, x, endY, 300L)
     }
 
-    fun typeTextIntoFocusedField(text: String): Boolean {
-        val root = findBestForegroundWindowRoot() ?: return false
-        val target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            ?: findFirstEditable(root, 0)
-            ?: return false
+    fun getForegroundPackageName(): String {
+        return findBestForegroundWindowRoot()?.packageName?.toString().orEmpty()
+    }
 
-        target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+    private fun collectEditableNodes(
+        node: AccessibilityNodeInfo?,
+        depth: Int,
+        out: MutableList<AccessibilityNodeInfo>
+    ) {
+        if (node == null || depth > 28) return
+        val cls = node.className?.toString().orEmpty()
+        val isEdit = node.isEditable || cls.contains("EditText", ignoreCase = true) || cls.contains("AutoComplete", ignoreCase = true)
+        if (isEdit && node.isVisibleToUser && node.isEnabled) {
+            out.add(node)
+        }
+        for (i in 0 until node.childCount) {
+            collectEditableNodes(node.getChild(i), depth + 1, out)
+        }
+    }
+
+    private fun findBestEditableNode(
+        root: AccessibilityNodeInfo,
+        preferBottomChatBox: Boolean
+    ): AccessibilityNodeInfo? {
+        val candidates = mutableListOf<AccessibilityNodeInfo>()
+        collectEditableNodes(root, 0, candidates)
+        if (candidates.isEmpty()) return root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (focused != null && focused.isVisibleToUser && focused.isEnabled) {
+            val r = Rect()
+            focused.getBoundsInScreen(r)
+            if (candidates.size == 1 || (preferBottomChatBox && r.bottom > resources.displayMetrics.heightPixels / 2)) {
+                return focused
+            }
+        }
+
+        val rectA = Rect()
+        val rectB = Rect()
+        val sorted = candidates.sortedWith { a, b ->
+            a.getBoundsInScreen(rectA)
+            b.getBoundsInScreen(rectB)
+            if (preferBottomChatBox) rectB.bottom.compareTo(rectA.bottom) else rectA.top.compareTo(rectB.top)
+        }
+        return sorted.firstOrNull() ?: focused
+    }
+
+    private fun setTextOnNode(node: AccessibilityNodeInfo, text: String): Boolean {
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
-    fun autoTypeAndSend(text: String): Boolean {
-        val ok = typeTextIntoFocusedField(text)
-        if (ok) autoClickSendAfterDelay(350L)
-        return ok
+    private fun performImeEnter(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+        }
+        return false
+    }
+
+    fun typeTextIntoFocusedField(text: String, preferBottomChatBox: Boolean = true): Boolean {
+        val root = findBestForegroundWindowRoot() ?: return false
+        val target = findBestEditableNode(root, preferBottomChatBox) ?: return false
+        return setTextOnNode(target, text)
+    }
+
+    private fun clickActionButton(keywords: List<String>, idHints: List<String>): Boolean {
+        val root = findBestForegroundWindowRoot() ?: return false
+        val kwLower = keywords.map { it.lowercase() }
+        val idLower = idHints.map { it.lowercase() }
+        val matches = mutableListOf<Pair<Int, AccessibilityNodeInfo>>()
+
+        fun walk(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || depth > 28) return
+            if (node.isVisibleToUser && node.isEnabled) {
+                val txt = node.text?.toString()?.trim()?.lowercase().orEmpty()
+                val desc = node.contentDescription?.toString()?.trim()?.lowercase().orEmpty()
+                val vid = node.viewIdResourceName?.lowercase().orEmpty()
+                val shortId = vid.substringAfterLast("/")
+
+                var score = 0
+                if (txt.isNotEmpty() && txt.length <= 28) {
+                    if (kwLower.any { txt == it }) score = maxOf(score, 100)
+                    else if (kwLower.any { txt.startsWith(it) || txt.contains(it) }) score = maxOf(score, 70)
+                }
+                if (desc.isNotEmpty() && desc.length <= 36) {
+                    if (kwLower.any { desc == it }) score = maxOf(score, 95)
+                    else if (kwLower.any { desc.startsWith(it) || desc.contains(it) }) score = maxOf(score, 65)
+                }
+                if (shortId.isNotEmpty() && idLower.any { shortId == it || shortId.contains(it) }) {
+                    score = maxOf(score, 80)
+                }
+
+                if (score > 0) {
+                    matches.add(score to node)
+                }
+            }
+            for (i in 0 until node.childCount) {
+                walk(node.getChild(i), depth + 1)
+            }
+        }
+        walk(root, 0)
+
+        for ((_, node) in matches.sortedByDescending { it.first }) {
+            if (clickNearestClickable(node)) return true
+        }
+        return false
+    }
+
+    fun autoTypeAndSend(text: String, isPostOrComment: Boolean = false): Boolean {
+        val root = findBestForegroundWindowRoot() ?: return false
+        val target = findBestEditableNode(root, preferBottomChatBox = !isPostOrComment) ?: return false
+        if (!setTextOnNode(target, text)) return false
+
+        if (isPostOrComment) {
+            autoClickPostAfterDelay(450L)
+        } else {
+            mainHandler.postDelayed({
+                val clicked = clickActionButton(
+                    keywords = listOf("send", "send message", "পাঠান", "পাঠাও", "reply", "send now"),
+                    idHints = listOf("send", "send_btn", "send_button", "composer_send", "conversation_send")
+                )
+                if (!clicked) {
+                    val freshRoot = findBestForegroundWindowRoot()
+                    val freshFocus = freshRoot?.let { findBestEditableNode(it, true) }
+                    performImeEnter(freshFocus)
+                }
+            }, 420L)
+        }
+        return true
+    }
+
+    fun searchInActiveApp(query: String): Boolean {
+        val clean = query.trim()
+        if (clean.isEmpty()) return false
+        val root = findBestForegroundWindowRoot() ?: return false
+
+        // 1. Check if an editable search bar is already visible on screen
+        val existingInput = findBestEditableNode(root, preferBottomChatBox = false)
+        if (existingInput != null) {
+            val vid = existingInput.viewIdResourceName?.lowercase().orEmpty()
+            val desc = existingInput.contentDescription?.toString()?.lowercase().orEmpty()
+            val hint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                existingInput.hintText?.toString()?.lowercase().orEmpty()
+            } else ""
+            val looksSearch = vid.contains("search") || vid.contains("url") || vid.contains("omnibox") ||
+                desc.contains("search") || hint.contains("search") || hint.contains("khuj") ||
+                hint.contains("সার্চ") || hint.contains("type web address")
+            if (looksSearch) {
+                if (!setTextOnNode(existingInput, clean)) return false
+                mainHandler.postDelayed({
+                    performImeEnter(findBestForegroundWindowRoot()?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: existingInput)
+                    clickActionButton(
+                        keywords = listOf("search", "go", "submit", "সার্চ", "খুঁজুন"),
+                        idHints = listOf("search_go_btn", "search_button", "go", "submit")
+                    )
+                }, 280L)
+                return true
+            }
+        }
+
+        // 2. Click the active app's Search icon/bar first, then enter the query
+        val openedSearch = clickActionButton(
+            keywords = listOf("search", "search youtube", "search whatsapp", "search or type web address", "ask meta ai or search", "সার্চ", "খুঁজুন"),
+            idHints = listOf("menu_search", "search", "search_button", "search_bar", "url_bar", "search_mag_icon")
+        )
+        if (!openedSearch) return false
+
+        mainHandler.postDelayed({
+            val afterRoot = findBestForegroundWindowRoot() ?: return@postDelayed
+            val input = findBestEditableNode(afterRoot, preferBottomChatBox = false) ?: return@postDelayed
+            if (setTextOnNode(input, clean)) {
+                mainHandler.postDelayed({
+                    performImeEnter(findBestForegroundWindowRoot()?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: input)
+                    clickActionButton(
+                        keywords = listOf("search", "go", "সার্চ", "খুঁজুন"),
+                        idHints = listOf("search_go_btn", "search_button")
+                    )
+                }, 300L)
+            }
+        }, 500L)
+        return true
+    }
+
+    fun findOrSearchOnScreen(query: String): Boolean {
+        val clean = query.trim()
+        if (clean.isEmpty()) return false
+        // Prefer searching inside the active app if it looks like a multi-word search; or click visible item directly first
+        if (clean.split(" ").size <= 2 && clickNodeContainingText(clean)) {
+            return true
+        }
+        return searchInActiveApp(clean)
+    }
+
+    fun prepareFacebookPost(text: String) {
+        val clean = text.trim()
+        mainHandler.postDelayed({
+            clickActionButton(
+                keywords = listOf("what's on your mind", "write something", "create post", "মনে কী চলছে", "post"),
+                idHints = listOf("feed_composer", "composer", "create_post")
+            )
+            if (clean.isNotBlank()) {
+                mainHandler.postDelayed({
+                    val r = findBestForegroundWindowRoot() ?: return@postDelayed
+                    val box = findBestEditableNode(r, preferBottomChatBox = false) ?: return@postDelayed
+                    setTextOnNode(box, clean)
+                    mainHandler.postDelayed({
+                        clickActionButton(
+                            keywords = listOf("next", "post", "publish", "share", "পোস্ট"),
+                            idHints = listOf("composer_post_button", "post_button", "submit")
+                        )
+                    }, 550L)
+                }, 950L)
+            }
+        }, 900L)
+    }
+
+    fun autoClickFirstYouTubeResult(delayMs: Long = 1800L) {
+        mainHandler.postDelayed({
+            val root = findBestForegroundWindowRoot() ?: return@postDelayed
+            val minY = (resources.displayMetrics.heightPixels * 0.16f).toInt()
+            val maxY = (resources.displayMetrics.heightPixels * 0.85f).toInt()
+            val rect = Rect()
+
+            fun walkVideo(node: AccessibilityNodeInfo?, depth: Int): Boolean {
+                if (node == null || depth > 25) return false
+                if (node.isVisibleToUser && node.isClickable) {
+                    node.getBoundsInScreen(rect)
+                    val desc = node.contentDescription?.toString()?.lowercase().orEmpty()
+                    val txt = node.text?.toString()?.lowercase().orEmpty()
+                    val combined = "$desc $txt"
+                    val isTopChrome = rect.top < minY || rect.bottom > maxY
+                    val isVideoCard = !isTopChrome &&
+                        rect.height() > 140 &&
+                        rect.width() > (resources.displayMetrics.widthPixels * 0.45f).toInt() &&
+                        !combined.contains("filter") &&
+                        !combined.contains("sponsored") &&
+                        !combined.contains("subscribe") &&
+                        (combined.contains("minute") || combined.contains("second") || combined.contains("hour") ||
+                            combined.contains("views") || combined.contains("মিনিট") || combined.length > 18)
+                    if (isVideoCard && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        return true
+                    }
+                }
+                for (i in 0 until node.childCount) {
+                    if (walkVideo(node.getChild(i), depth + 1)) return true
+                }
+                return false
+            }
+            walkVideo(root, 0)
+        }, delayMs)
+    }
+
+    fun skipAdIfPresent(): Boolean {
+        return clickActionButton(
+            keywords = listOf("skip ad", "skip ads", "skip", "স্কিপ"),
+            idHints = listOf("skip_ad_button", "skip_button")
+        )
     }
 
     fun openStoryCreator(): Boolean {
-        return clickNodeContainingText("story") || clickNodeContainingText("স্টোরি")
+        return clickActionButton(
+            keywords = listOf("create story", "add to story", "your story", "story", "স্টোরি"),
+            idHints = listOf("create_story", "story")
+        )
     }
 
-    fun autoClickSendAfterDelay(delayMs: Long = 900L) {
+    fun autoClickSendAfterDelay(delayMs: Long = 750L) {
         mainHandler.postDelayed({
-            clickNodeContainingText("send") || clickNodeContainingText("পাঠান") || clickNodeContainingText("পাঠাও")
+            clickActionButton(
+                keywords = listOf("send", "send message", "পাঠান", "পাঠাও"),
+                idHints = listOf("send", "send_btn", "send_button", "composer_send")
+            )
+        }, delayMs)
+    }
+
+    fun autoClickPostAfterDelay(delayMs: Long = 750L) {
+        mainHandler.postDelayed({
+            clickActionButton(
+                keywords = listOf("post", "publish", "share", "reply", "comment", "পোস্ট", "শেয়ার"),
+                idHints = listOf("post", "post_button", "submit", "publish")
+            )
         }, delayMs)
     }
 
     fun autoClickCallAfterDelay(delayMs: Long = 500L) {
         mainHandler.postDelayed({
-            clickNodeContainingText("call") || clickNodeContainingText("dial") || clickNodeContainingText("কল")
+            clickActionButton(
+                keywords = listOf("call", "dial", "কল"),
+                idHints = listOf("dialpad_floating_action_button", "call_button", "call")
+            )
         }, delayMs)
     }
 
@@ -419,15 +704,5 @@ class ZeeAccessibilityService : AccessibilityService() {
         }
         extract(root, 0)
         return sb.toString().take(maxChars)
-    }
-
-    private fun findFirstEditable(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
-        if (node == null || depth > 25) return null
-        if (node.isEditable && node.isVisibleToUser && node.isEnabled) return node
-        for (i in 0 until node.childCount) {
-            val found = findFirstEditable(node.getChild(i), depth + 1)
-            if (found != null) return found
-        }
-        return null
     }
 }
