@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import com.zeeai.companion.voice.NativeVoiceController
 import com.zeeai.companion.voice.NativeVoiceProfile
 import com.zeeai.companion.voice.VoiceState
+import com.zeeai.companion.ui.PhoneControlDualDashboard
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -323,6 +324,28 @@ fun PhoneControlScreen(
                 fontSize = 11.sp
             )
 
+            // Voice Pack Download & Setup Guide Card
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0F172A), RoundedCornerShape(10.dp))
+                    .border(1.dp, Color(0xFF334155), RoundedCornerShape(10.dp))
+                    .padding(10.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("💡 অফলাইন ভয়েস ডাউনলোড লিংক ও গাইড:", color = Color(0xFFFBBF24), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text(
+                        "ZEE ও ZHEE অফলাইনে কথা বলার জন্য Android-এর Google Speech Services ব্যবহার করে:\n" +
+                        "১. নিচের '📥 ইনস্টল বাংলা ভয়েস' অথবা '🛍️ Play Store TTS'-এ ট্যাপ করুন।\n" +
+                        "২. Google TTS সেটিংসে গিয়ে 'Install voice data' ➔ 'Bengali (Bangladesh/India)' ডাউনলোড করুন।\n" +
+                        "৩. ডাউনলোড শেষ হলে '🔊 Test' বাটনে চাপ দিয়ে কণ্ঠ নিশ্চিত করুন।",
+                        color = Silver,
+                        fontSize = 10.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+
             if (voiceStatusMsg.isNotBlank()) {
                 Text(voiceStatusMsg, color = Cyan, fontSize = 11.sp)
             }
@@ -333,25 +356,24 @@ fun PhoneControlScreen(
             ) {
                 Button(
                     onClick = {
-                        voiceStatusMsg = "Google TTS ওপেন হচ্ছে... Bengali / Male ভয়েস প্যাক ইনস্টল করুন।"
+                        voiceStatusMsg = "Google TTS সেটিংস খুলছে... 'Install voice data' থেকে Bengali প্যাক ডাউনলোড করুন।"
                         voiceController.launchVoiceDataInstall(context, isFemale = false)
                         voicePackInfo = voiceController.getVoicePackInfo()
                     },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
                 ) {
-                    Text("📥 ZEE Male Pack", fontSize = 11.sp)
+                    Text("📥 ইনস্টল বাংলা ভয়েস", fontSize = 11.sp)
                 }
                 Button(
                     onClick = {
-                        voiceStatusMsg = "Google TTS ওপেন হচ্ছে... Bengali / Female ভয়েস প্যাক ইনস্টল করুন।"
-                        voiceController.launchVoiceDataInstall(context, isFemale = true)
-                        voicePackInfo = voiceController.getVoicePackInfo()
+                        voiceStatusMsg = "Play Store খুলছে... Speech Services by Google ইনস্টল বা আপডেট করুন।"
+                        voiceController.openGoogleSpeechServicesPlayStore(context)
                     },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
                 ) {
-                    Text("📥 ZHEE Female Pack", fontSize = 11.sp)
+                    Text("🛍️ Play Store TTS", fontSize = 11.sp)
                 }
             }
 
@@ -377,6 +399,15 @@ fun PhoneControlScreen(
                 ) {
                     Text("🔊 Test ZHEE Female", fontSize = 11.sp)
                 }
+            }
+
+            TextButton(
+                onClick = {
+                    voiceController.openTtsSettings(context)
+                },
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text("⚙️ Open System Text-to-Speech Settings", color = Silver.copy(alpha = 0.8f), fontSize = 11.sp)
             }
         }
 
@@ -528,124 +559,22 @@ fun PhoneControlScreen(
             }
         }
 
-        // Quick 1-Tap Action Chips Grid
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(CardNavy, RoundedCornerShape(16.dp))
-                .border(1.dp, Silver.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text("One-Tap Phone Action Controls", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-
-            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        val ok = phoneCommander.toggleTorch()
-                        torchState = phoneCommander.isTorchActive()
-                        val msg = if (torchState) "Flashlight on korechi." else "Flashlight bondho korechi."
-                        actionLogs.add(0, PhoneActionLog(command = "Torch Toggle", result = msg))
-                        voiceController.speak(msg, voiceProfile)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (torchState) Color(0xFFF59E0B) else Color(0xFF1E293B)
-                    )
-                ) {
-                    Text(if (torchState) "🔦 Torch: ON" else "🔦 Torch: OFF", fontSize = 11.sp)
-                }
-
-                Button(
-                    onClick = {
-                        val reply = phoneCommander.adjustVolume("up")
-                        actionLogs.add(0, PhoneActionLog(command = "Volume Up", result = reply))
-                        voiceController.speak(reply, voiceProfile)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
-                ) {
-                    Text("🔊 Volume +", fontSize = 11.sp)
-                }
-
-                Button(
-                    onClick = {
-                        val reply = phoneCommander.adjustVolume("down")
-                        actionLogs.add(0, PhoneActionLog(command = "Volume Down", result = reply))
-                        voiceController.speak(reply, voiceProfile)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
-                ) {
-                    Text("🔉 Volume -", fontSize = 11.sp)
-                }
-
-                Button(
-                    onClick = {
-                        val reply = phoneCommander.adjustVolume("max")
-                        actionLogs.add(0, PhoneActionLog(command = "Max Volume", result = reply))
-                        voiceController.speak(reply, voiceProfile)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
-                ) {
-                    Text("💯 Volume Max", fontSize = 11.sp)
-                }
-            }
-
-            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { executePhoneCommand("screenshot nao") }) {
-                    Text("📸 Screenshot", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("lock screen") }) {
-                    Text("🔒 Lock Screen", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("screen poro") }) {
-                    Text("📖 Read Screen", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("home jao") }) {
-                    Text("🏠 Home", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("back jao") }) {
-                    Text("🔙 Back", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("recent apps") }) {
-                    Text("📑 Recents", fontSize = 11.sp)
-                }
-            }
-
-            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { executePhoneCommand("story post koro") },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE1306C))
-                ) {
-                    Text("📸 Post Story", fontSize = 11.sp)
-                }
-                Button(
-                    onClick = { executePhoneCommand("call dialer") },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
-                ) {
-                    Text("📞 Call / Dialer", fontSize = 11.sp)
-                }
-                Button(
-                    onClick = { executePhoneCommand("open WhatsApp") },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
-                ) {
-                    Text("💬 WhatsApp", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("open Messenger") }) {
-                    Text("⚡ Messenger", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("open YouTube") }) {
-                    Text("🎥 YouTube", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("open Chrome") }) {
-                    Text("🌐 Chrome", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("open Camera") }) {
-                    Text("📷 Camera", fontSize = 11.sp)
-                }
-                OutlinedButton(onClick = { executePhoneCommand("open Calculator") }) {
-                    Text("🔢 Calculator", fontSize = 11.sp)
-                }
-            }
-        }
+        // Dual Phone Controls Dashboard (Offline Instant + Online Smart)
+        val installedVoiceCount = com.zeeai.companion.voice.OfflineVoiceCatalog.countInstalledPacks(context)
+        PhoneControlDualDashboard(
+            isAccessibilityActive = isAccessibilityActive || isAccessibilityConnected,
+            isMicGranted = hasMic,
+            isInternetConnected = isNetworkAvailable(),
+            installedOfflineVoiceCount = installedVoiceCount,
+            lastActionFeedback = actionLogs.firstOrNull()?.result.orEmpty(),
+            onRunCommand = { cmd -> executePhoneCommand(cmd) },
+            onOpenAccessibilitySettings = {
+                context.startActivity(
+                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            },
+            onRequestMicPermission = onRequestMic
+        )
 
         // Text Command Input (Alternative to Voice)
         Row(
