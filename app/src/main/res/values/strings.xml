@@ -1,4 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ZEE AI</string>
-    <string name="zee_accessibility_description">Allows ZEE AI to read visible screen text and run voice-triggered navigation when you explicitly request it. Password fields are always excluded.</string>
+    <string name="zee_accessibility_description">ZEE AI uses Accessibility strictly when you command navigation (Home, Back, Screenshot, Scroll, tap buttons), screen context triage, or macro recording. No passwords or private data are uploaded.</string>
+    <string name="accessibility_service_description">ZEE AI uses Accessibility strictly when you command navigation (Home, Back, Screenshot, Scroll, tap buttons), screen context triage, or macro recording. No passwords or private data are uploaded.</string>
+    <string name="notification_listener_label">ZEE AI Smart Inbox Triage</string>
 </resources>
