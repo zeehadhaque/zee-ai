@@ -104,12 +104,6 @@ android {
 }
 
 dependencies {
-    // Official Sherpa-ONNX Android AAR (app/libs/ folder-e rakha hobe)
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
-
-    // Official k2-fsa/sherpa-onnx .tar.bz2 neural voice pack extract korar jonno
-    implementation("org.apache.commons:commons-compress:1.27.1")
-
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.9.3")
