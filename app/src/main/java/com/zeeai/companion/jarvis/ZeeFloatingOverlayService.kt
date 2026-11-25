@@ -233,7 +233,7 @@ class ZeeFloatingOverlayService : Service() {
 
             val btnScreen = makeGlassButton("Read Screen", Color.rgb(0, 229, 255), density) {
                 statusTitleView?.text = "ZEE AI // SCANNING..."
-                summaryBodyView?.text = "Extracting foreground text cleanly..."
+                summaryBodyView?.text = "Extracting foreground screen nodes..."
                 ZeeAccessibilityService.sendControlCommand(this@ZeeFloatingOverlayService, "SNAPSHOT_SCREEN")
             }
 
@@ -251,7 +251,15 @@ class ZeeFloatingOverlayService : Service() {
             })
             row1.addView(btnOpen, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
-            val btnClose = makeGlassButton("Dismiss Bubble", Color.rgb(255, 82, 82), density) {
+            val btnStopMic = makeGlassButton("Stop Hands-Free Mic", Color.rgb(245, 158, 11), density) {
+                com.zeeai.companion.voice.WakeWordEventBus.setPhoneMicSessionDesired(false)
+                com.zeeai.companion.voice.WakeWordForegroundService.stop(this@ZeeFloatingOverlayService)
+                orbView?.setPhase("IDLE")
+                statusTitleView?.text = "ZEE AI // MIC STOPPED"
+                summaryBodyView?.text = "Hands-free mic stopped. Tap Open HUD to restart."
+            }
+
+            val btnClose = makeGlassButton("Dismiss Orb", Color.rgb(255, 82, 82), density) {
                 JarvisPreferences(this@ZeeFloatingOverlayService).update { it.copy(overlayBubbleActive = false) }
                 stopSelf()
             }
@@ -259,6 +267,12 @@ class ZeeFloatingOverlayService : Service() {
             addView(title)
             addView(body)
             addView(row1)
+            addView(btnStopMic, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = (6 * density).toInt()
+            })
             addView(btnClose, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
