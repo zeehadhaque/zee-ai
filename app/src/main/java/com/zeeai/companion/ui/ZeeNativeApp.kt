@@ -51,7 +51,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.zeeai.companion.R
 import com.zeeai.companion.ai.ActiveEngineRoute
+import com.zeeai.companion.ai.BestFriendPersona
 import com.zeeai.companion.ai.GeminiNativeClient
+import com.zeeai.companion.ai.OfflineChatTurn
 import com.zeeai.companion.ai.RouterConfig
 import com.zeeai.companion.ai.UnifiedCommandAndChatRouter
 import com.zeeai.companion.automation.NativePhoneCommander
@@ -65,12 +67,6 @@ import com.zeeai.companion.data.local.MemoryEntity
 import com.zeeai.companion.data.local.SecureKeyVault
 import com.zeeai.companion.data.local.ZeeDatabase
 import com.zeeai.companion.jarvis.*
-import com.zeeai.companion.offline.BestFriendPersona
-import com.zeeai.companion.offline.LocalLlmInferenceEngine
-import com.zeeai.companion.offline.OfflineBrainCoordinator
-import com.zeeai.companion.offline.OfflineChatTurn
-import com.zeeai.companion.offline.OfflineModelResolver
-import com.zeeai.companion.offline.OfflineModelStoreManager
 import com.zeeai.companion.offline.PersonalOfflineMemoryVault
 import com.zeeai.companion.studios.council.AICouncilScreen
 import com.zeeai.companion.studios.filmmaker.FilmmakerStudioScreen
@@ -107,8 +103,6 @@ private val Cyan = LuxuryPalette.ElectricCyan
 fun ZeeNativeApp(
     database: ZeeDatabase,
     keyVault: SecureKeyVault,
-    modelStore: OfflineModelStoreManager,
-    localLlm: LocalLlmInferenceEngine,
     openMicOnLaunch: Boolean = false
 ) {
     val context = LocalContext.current
@@ -118,7 +112,6 @@ fun ZeeNativeApp(
     val phoneCommander = remember { NativePhoneCommander(context) }
     val offlineMemoryVault = remember { PersonalOfflineMemoryVault(context) }
     val offlinePhoneController = remember { OfflineAutonomousPhoneController(context, offlineMemoryVault) }
-    val offlineCoordinator = remember { OfflineBrainCoordinator(localLlm, offlineMemoryVault, offlinePhoneController) }
 
     // --- Jarvis Core Subsystem Initialization ---
     val jarvisPrefs = remember { JarvisPreferences(context) }
@@ -195,18 +188,7 @@ fun ZeeNativeApp(
 
     var customProviderKeyDraft by remember { mutableStateOf(keyVault.getKey("custom_provider_api_key")) }
 
-    var modelImportNote by remember { mutableStateOf("") }
-    val modelFilePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            val fileName = uri.lastPathSegment?.substringAfterLast("/") ?: "custom_model.bin"
-            val ok = modelStore.importLocalModelFile(uri, fileName)
-            modelImportNote = if (ok) "Successfully imported $fileName" else "Failed to import model file."
-        }
-    }
-
-    var activeTab by remember { mutableStateOf("companion") } // companion | phone_control | jarvis_settings | permissions_hub | ...
+    var activeTab by remember { mutableStateOf("companion") } // companion | phone_control | jarvis_settings | permissions_hub | settings
     var activeCharId by remember { mutableStateOf("zee") }    // zee | zhee
     var isSpeaking by remember { mutableStateOf(false) }
     var isGenerating by remember { mutableStateOf(false) }
@@ -216,61 +198,63 @@ fun ZeeNativeApp(
     var textInput by remember { mutableStateOf("") }
     var pendingConfirm by remember { mutableStateOf<PendingConfirmation?>(null) }
 
-    var forceOfflineMode by remember { mutableStateOf(keyVault.getKey("force_offline_engine") == "true") }
+    var activeGeminiFlash by remember {
+        val initial = keyVault.getKey("gemini_flash_model").removePrefix("models/").trim()
+        mutableStateOf(if (GeminiNativeClient.isValidChatModel(initial)) initial else GeminiNativeClient.DEFAULT_FLASH_MODEL)
+    }
+    var activeGeminiPro by remember {
+        val initial = keyVault.getKey("gemini_pro_model").removePrefix("models/").trim()
+        mutableStateOf(if (GeminiNativeClient.isValidChatModel(initial)) initial else GeminiNativeClient.DEFAULT_PRO_MODEL)
+    }
+    var autoDiscoveredGeminiModels by remember {
+        mutableStateOf(
+            keyVault.getKey("gemini_discovered_models")
+                .split(",")
+                .map { it.removePrefix("models/").trim() }
+                .filter { GeminiNativeClient.isValidChatModel(it) }
+                .distinct()
+        )
+    }
 
     LaunchedEffect(Unit) {
-        val curFlash = keyVault.getKey("gemini_flash_model").removePrefix("models/").trim()
-        if (curFlash.isBlank() || curFlash.contains("3.") || curFlash.contains("4") || curFlash.contains("-exp") || curFlash == "gemini-exp-1206") {
-            keyVault.saveKey("gemini_flash_model", GeminiNativeClient.DEFAULT_FLASH_MODEL)
+        val savedKey = keyVault.getKey("gemini_api_key").trim()
+        if (!GeminiNativeClient.isValidChatModel(activeGeminiFlash)) {
+            activeGeminiFlash = GeminiNativeClient.DEFAULT_FLASH_MODEL
+            keyVault.saveKey("gemini_flash_model", activeGeminiFlash)
         }
-        val curPro = keyVault.getKey("gemini_pro_model").removePrefix("models/").trim()
-        if (curPro.isBlank() || curPro.contains("3.") || curPro.contains("4") || curPro.contains("-exp") || curPro == "gemini-exp-1206") {
-            keyVault.saveKey("gemini_pro_model", GeminiNativeClient.DEFAULT_PRO_MODEL)
+        if (!GeminiNativeClient.isValidChatModel(activeGeminiPro)) {
+            activeGeminiPro = GeminiNativeClient.DEFAULT_PRO_MODEL
+            keyVault.saveKey("gemini_pro_model", activeGeminiPro)
+        }
+        if (savedKey.isNotBlank() && autoDiscoveredGeminiModels.isNotEmpty()) {
+            geminiClient.primeDiscoveredModels(savedKey, autoDiscoveredGeminiModels, activeGeminiFlash, activeGeminiPro)
         }
         jarvisCore.initialize()
-    }
 
-    val messages by dao.observeMessages().collectAsState(initial = emptyList())
-    val memories by dao.observeAllMemories().collectAsState(initial = emptyList())
-    val models by modelStore.modelsState.collectAsState()
-    val wakeWordRunning by WakeWordEventBus.isRunning.collectAsState()
-
-    var activeOfflineModelId by remember {
-        mutableStateOf(keyVault.getKey("active_offline_model_id"))
-    }
-    var activeOfflineModelPath by remember {
-        mutableStateOf(keyVault.getKey("active_offline_model_path"))
-    }
-
-    LaunchedEffect(models) {
-        val installedList = models.filter { it.installed }
-        if (installedList.isNotEmpty()) {
-            val savedPath = keyVault.getKey("active_offline_model_path")
-            val savedId = keyVault.getKey("active_offline_model_id")
-            val matchingModel = installedList.firstOrNull { it.spec.id == savedId }
-                ?: installedList.firstOrNull { modelStore.getLocalModelFile(it.spec.id)?.exists() == true }
-                ?: installedList.first()
-            val effectivePath = modelStore.getLocalModelFile(matchingModel.spec.id)?.absolutePath
-                ?: localLlm.findFirstInstalledModelFile()?.absolutePath.orEmpty()
-            if (savedId != matchingModel.spec.id || savedPath != effectivePath) {
-                activeOfflineModelId = matchingModel.spec.id
-                activeOfflineModelPath = effectivePath
-                keyVault.saveKey("active_offline_model_id", matchingModel.spec.id)
-                keyVault.saveKey("active_offline_model_path", effectivePath)
+        // Auto-sync live latest models whenever a Google AI Studio key is configured
+        if (savedKey.isNotBlank()) {
+            geminiClient.discoverModels(savedKey).onSuccess { disc ->
+                val bestFlash = disc.bestFlashModel.removePrefix("models/").trim()
+                val bestPro = disc.bestProModel.removePrefix("models/").trim()
+                val liveIds = disc.models.map { it.id.removePrefix("models/").trim() }.distinct()
+                activeGeminiFlash = bestFlash
+                activeGeminiPro = bestPro
+                autoDiscoveredGeminiModels = liveIds
+                keyVault.saveKey("gemini_api_status", "verified")
+                keyVault.saveKey("gemini_status_msg", "Auto-Synced • ${liveIds.size} live models active")
+                keyVault.saveKey("gemini_discovered_models", liveIds.joinToString(","))
+                keyVault.saveKey("gemini_flash_model", bestFlash)
+                keyVault.saveKey("gemini_pro_model", bestPro)
+                if (jarvisPrefs.state.value.aiProviderPreset == "gemini") {
+                    jarvisPrefs.update { it.copy(aiCustomModel = bestFlash) }
+                }
             }
         }
     }
 
-    LaunchedEffect(forceOfflineMode, activeOfflineModelPath) {
-        val targetPath = if (activeOfflineModelPath.isNotBlank() && File(activeOfflineModelPath).exists()) {
-            activeOfflineModelPath
-        } else {
-            localLlm.findFirstInstalledModelFile()?.absolutePath
-        }
-        if (targetPath != null) {
-            localLlm.prewarmModel(targetPath)
-        }
-    }
+    val messages by dao.observeMessages().collectAsState(initial = emptyList())
+    val memories by dao.observeAllMemories().collectAsState(initial = emptyList())
+    val wakeWordRunning by WakeWordEventBus.isRunning.collectAsState()
 
     var sendTurnAction by remember { mutableStateOf<(String) -> Unit>({}) }
 
@@ -364,7 +348,6 @@ fun ZeeNativeApp(
     DisposableEffect(Unit) {
         onDispose {
             geminiClient.cancelActive()
-            localLlm.cancelActiveGeneration()
             voiceController.shutdown()
             voiceInputController.stopListening(resumeWakeWord = true)
             jarvisCore.release()
@@ -415,7 +398,6 @@ fun ZeeNativeApp(
     val activeGeminiKey = keyVault.getKey("gemini_api_key")
     val activeElevenLabsKey = keyVault.getKey("elevenlabs_api_key")
     val isVoiceOnline = isNetworkAvailable()
-    val isAppOnline = !forceOfflineMode && isVoiceOnline
     LaunchedEffect(activeGeminiKey, activeElevenLabsKey, isVoiceOnline) {
         voiceController.setApiKeys(activeGeminiKey, activeElevenLabsKey, isVoiceOnline)
         voiceController.updateOnlineVoiceConfig(OnlineHumanVoiceCatalog.loadConfig(keyVault))
@@ -431,35 +413,14 @@ fun ZeeNativeApp(
         UnifiedCommandAndChatRouter(
             context = context,
             phoneController = offlinePhoneController,
-            offlineBrain = offlineCoordinator,
             geminiClient = geminiClient
         )
     }
 
-    var activeRoute by remember {
-        mutableStateOf(if (forceOfflineMode || !isNetworkAvailable()) ActiveEngineRoute.OFFLINE else ActiveEngineRoute.ONLINE)
-    }
-    var selectedOnlineModel by remember {
-        mutableStateOf(keyVault.getKey("gemini_flash_model").removePrefix("models/").ifBlank { "gemini-2.0-flash" })
-    }
-    var installedOfflineModels by remember {
-        mutableStateOf(OfflineModelResolver.scanInstalledModels(context))
-    }
-    var selectedOfflineModel by remember {
-        mutableStateOf(OfflineModelResolver.resolveActiveModel(context))
-    }
-
-    LaunchedEffect(models) {
-        installedOfflineModels = OfflineModelResolver.scanInstalledModels(context)
-        if (selectedOfflineModel == null && installedOfflineModels.isNotEmpty()) {
-            selectedOfflineModel = OfflineModelResolver.resolveActiveModel(context)
-        }
-    }
-
     val effectiveOnlineModel = if (jarvisSettings.aiProviderPreset == "gemini") {
-        selectedOnlineModel
+        activeGeminiFlash
     } else {
-        jarvisSettings.aiCustomModel.ifBlank { selectedOnlineModel }
+        jarvisSettings.aiCustomModel.ifBlank { activeGeminiFlash }
     }
     val effectiveProviderApiKey = when (jarvisSettings.aiProviderPreset) {
         "gemini" -> keyVault.getKey("gemini_api_key")
@@ -490,7 +451,6 @@ fun ZeeNativeApp(
 
         if (isGenerating) {
             geminiClient.cancelActive()
-            localLlm.cancelActiveGeneration()
             isGenerating = false
         }
         textInput = ""
@@ -503,7 +463,7 @@ fun ZeeNativeApp(
                     characterId = activeCharId,
                     role = "user",
                     text = prompt,
-                    source = if (activeRoute == ActiveEngineRoute.ONLINE && isNetworkAvailable()) "online" else "offline"
+                    source = if (isNetworkAvailable()) "online" else "offline"
                 )
             )
 
@@ -593,9 +553,8 @@ fun ZeeNativeApp(
                 .map { OfflineChatTurn(isUser = it.role == "user", text = it.text) }
 
             val config = RouterConfig(
-                route = activeRoute,
+                route = ActiveEngineRoute.ONLINE,
                 selectedOnlineModel = effectiveOnlineModel,
-                selectedOfflineModelPath = selectedOfflineModel?.filePath ?: activeOfflineModelPath,
                 persona = if (activeCharId == "zhee") BestFriendPersona.ZHEE else BestFriendPersona.ZEE,
                 geminiApiKey = keyVault.getKey("gemini_api_key"),
                 groqApiKey = keyVault.getKey("groq_api_key"),
@@ -603,8 +562,7 @@ fun ZeeNativeApp(
                 customProviderPreset = jarvisSettings.aiProviderPreset,
                 customBaseUrl = jarvisSettings.aiBaseUrl,
                 customApiKey = customProviderKeyDraft,
-                hermesPersonaDirective = hermesEngine.buildPersonaDirective(),
-                localFirstPrivacy = jarvisSettings.localFirstPrivacy
+                hermesPersonaDirective = hermesEngine.buildPersonaDirective()
             )
 
             val reply = withContext(Dispatchers.IO) {
@@ -626,7 +584,7 @@ fun ZeeNativeApp(
                     characterId = activeCharId,
                     role = "assistant",
                     text = reply,
-                    source = if (activeRoute == ActiveEngineRoute.ONLINE && isNetworkAvailable()) "online-ai" else "offline-companion"
+                    source = "online-ai"
                 )
             )
             productivityStore.recordSession(
@@ -640,6 +598,7 @@ fun ZeeNativeApp(
                 jarvisCore.emitBanner(reply.take(130))
             }
             val cleanSpeak = reply.substringBefore("\n\n⚡").substringBefore("\n\n[Action")
+                .removePrefix("⚠️").trim()
             onReplyCompleted?.invoke(reply)
             if ((autoSpeak || forceSpeak) && reply.isNotBlank()) {
                 voiceController.speak(cleanSpeak.ifBlank { reply }, voiceProfile)
@@ -704,7 +663,6 @@ fun ZeeNativeApp(
 
     fun stopAllSystems() {
         geminiClient.cancelActive()
-        localLlm.cancelActiveGeneration()
         voiceController.emergencyStop()
         voiceInputController.stopListening(resumeWakeWord = true)
         WakeWordForegroundService.stop(context)
@@ -884,10 +842,7 @@ fun ZeeNativeApp(
                             DrawerActionItem("Permissions Hub (8 Bridges)", "🔐", selected = activeTab == "permissions_hub") {
                                 activeTab = "permissions_hub"; scope.launch { drawerState.close() }
                             }
-                            DrawerActionItem("Offline Gemma AI Models", "🧠", selected = activeTab == "models") {
-                                activeTab = "models"; scope.launch { drawerState.close() }
-                            }
-                            DrawerActionItem("API Keys & Keystore Vault", "🔑", selected = activeTab == "settings") {
+                            DrawerActionItem("API Keys & Online Voice", "🔑", selected = activeTab == "settings") {
                                 activeTab = "settings"; scope.launch { drawerState.close() }
                             }
 
@@ -916,7 +871,7 @@ fun ZeeNativeApp(
                                     Triple("companion", "ZEE HUD", "⚡"),
                                     Triple("phone_control", "Phone", "📱"),
                                     Triple("jarvis_settings", "Core", "🌌"),
-                                    Triple("models", "Models", "🧠"),
+                                    Triple("settings", "Keys", "🔑"),
                                     Triple("permissions_hub", "Perms", "🔐")
                                 ).forEach { (id, label, iconEmoji) ->
                                     NavigationBarItem(
@@ -987,10 +942,9 @@ fun ZeeNativeApp(
                                         PulsingServiceDot(enabled = isAccessibilityActive || isAccessibilityConnected)
                                     }
                                     Text(
-                                        if (forceOfflineMode || jarvisSettings.localFirstPrivacy) "Local Offline Cortex"
-                                        else if (isNetworkAvailable()) "Online • ${jarvisSettings.aiProviderPreset.uppercase()}"
-                                        else "Offline Fallback",
-                                        color = if (forceOfflineMode) LuxuryPalette.QuantumViolet else if (isNetworkAvailable()) LuxuryPalette.EmeraldNeon else LuxuryPalette.SolarGold,
+                                        if (isNetworkAvailable()) "Online • $activeGeminiFlash"
+                                        else "Offline (Phone Controls Ready)",
+                                        color = if (isNetworkAvailable()) LuxuryPalette.EmeraldNeon else LuxuryPalette.SolarGold,
                                         fontSize = 9.5.sp,
                                         fontFamily = FontFamily.Monospace
                                     )
@@ -1000,23 +954,6 @@ fun ZeeNativeApp(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Surface(
-                                    onClick = {
-                                        forceOfflineMode = !forceOfflineMode
-                                        keyVault.saveKey("force_offline_engine", forceOfflineMode.toString())
-                                    },
-                                    shape = RoundedCornerShape(50),
-                                    color = if (forceOfflineMode) Color(0xFF1F2937) else Color(0xFF092234),
-                                    border = BorderStroke(1.dp, if (forceOfflineMode) LuxuryPalette.SolarGold else activeAccent)
-                                ) {
-                                    Text(
-                                        text = if (forceOfflineMode) "Offline" else "Auto",
-                                        color = if (forceOfflineMode) LuxuryPalette.ChampagneGold else activeAccent,
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                                    )
-                                }
                                 IconButton(
                                     onClick = { activeTab = if (activeTab == "jarvis_settings") "companion" else "jarvis_settings" },
                                     modifier = Modifier.size(30.dp)
@@ -1084,8 +1021,8 @@ fun ZeeNativeApp(
                                             hudStyle = jarvisSettings.hudStyle,
                                             accentPrimary = activeAccent,
                                             statusMessage = hudStatusLabel,
-                                            activeModelLabel = if (activeRoute == ActiveEngineRoute.ONLINE && isAppOnline) effectiveOnlineModel else (selectedOfflineModel?.displayName ?: "Gemma"),
-                                            activeRouteLabel = if (activeRoute == ActiveEngineRoute.ONLINE && isAppOnline) "ONLINE" else "OFFLINE",
+                                            activeModelLabel = effectiveOnlineModel,
+                                            activeRouteLabel = if (isNetworkAvailable()) "ONLINE" else "OFFLINE",
                                             micRms = voiceInputState.rmsLevel,
                                             alwaysOnEnabled = jarvisSettings.alwaysOnListening,
                                             airGesturesEnabled = airGesturesEnabled,
@@ -1175,31 +1112,11 @@ fun ZeeNativeApp(
 
                                         if (jarvisSettings.appMode == ZeeAppMode.CHAT) {
                                             Spacer(Modifier.height(4.dp))
-                                            ChatDualModelSelectorBoxes(
-                                                activeRoute = activeRoute,
+                                            AutoOnlineEngineBanner(
                                                 isInternetConnected = isNetworkAvailable(),
-                                                onlineModels = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", jarvisSettings.aiCustomModel).filter { it.isNotBlank() }.distinct(),
-                                                selectedOnlineModel = effectiveOnlineModel,
-                                                offlineModels = installedOfflineModels,
-                                                selectedOfflineModelPath = selectedOfflineModel?.filePath,
-                                                onSelectOnlineModel = { modelId ->
-                                                    selectedOnlineModel = modelId
-                                                    activeRoute = ActiveEngineRoute.ONLINE
-                                                    keyVault.saveKey("gemini_flash_model", modelId)
-                                                    forceOfflineMode = false
-                                                    keyVault.saveKey("force_offline_engine", "false")
-                                                },
-                                                onSelectOfflineModel = { model ->
-                                                    selectedOfflineModel = model
-                                                    activeRoute = ActiveEngineRoute.OFFLINE
-                                                    OfflineModelResolver.setActiveModel(context, model.filePath)
-                                                    activeOfflineModelPath = model.filePath
-                                                    activeOfflineModelId = model.id
-                                                    keyVault.saveKey("active_offline_model_path", model.filePath)
-                                                    keyVault.saveKey("active_offline_model_id", model.id)
-                                                    localLlm.prewarmModel(model.filePath)
-                                                },
-                                                onOpenModelsTab = { activeTab = "models" }
+                                                activeModelName = effectiveOnlineModel,
+                                                hasApiKey = effectiveProviderApiKey.isNotBlank(),
+                                                onOpenKeysSettings = { activeTab = "settings" }
                                             )
                                         } else {
                                             // Agent Mode Accessibility Alert + Suggestion Chips
@@ -1464,7 +1381,6 @@ fun ZeeNativeApp(
                             database = database,
                             keyVault = keyVault,
                             geminiClient = geminiClient,
-                            localLlm = localLlm,
                             isOnline = { isNetworkAvailable() }
                         )
 
@@ -1486,7 +1402,6 @@ fun ZeeNativeApp(
                             activeCharId = activeCharId,
                             keyVault = keyVault,
                             geminiClient = geminiClient,
-                            localLlm = localLlm,
                             isOnline = { isNetworkAvailable() }
                         )
 
@@ -1538,405 +1453,86 @@ fun ZeeNativeApp(
                         }
                     }
 
-                    "models" -> {
-                        val hfToken = keyVault.getKey("hf_token")
-
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            // Active Offline Brain Status Card
-                            item {
-                                val activeModelItem = models.firstOrNull { it.installed && it.spec.id == activeOfflineModelId }
-                                    ?: models.firstOrNull { it.installed }
-                                val hasInstalledBrain = activeModelItem != null
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(if (hasInstalledBrain) Color(0xFF0F2942) else CardSurface, RoundedCornerShape(14.dp))
-                                        .border(1.dp, if (hasInstalledBrain) ElectricBlue else Silver.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
-                                        .padding(14.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            if (hasInstalledBrain) "🧠 Active Offline Brain: ${activeModelItem?.spec?.name}" else "🧠 Offline Brain: No Model Active",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp
-                                        )
-                                        Text(
-                                            if (hasInstalledBrain) "● 100% Offline AI Ready • ${activeModelItem?.spec?.approxSizeMb} MB • On-device inference"
-                                            else "○ Inactive • নিচের ক্যাটালগ থেকে যেকোনো Gemma মডেল Download করে [Select Model] চাপুন",
-                                            color = if (hasInstalledBrain) Cyan else Silver,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                    if (hasInstalledBrain) {
-                                        Box(
-                                            modifier = Modifier
-                                                .background(Color(0xFF065F46), RoundedCornerShape(8.dp))
-                                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                                        ) {
-                                            Text("✓ Active", color = Color(0xFF34D399), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 24/7 Background Voice Assistant Card (Always Allow)
-                            item {
-                                val isWakeRunning by WakeWordEventBus.isRunning.collectAsState()
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(if (isWakeRunning) Color(0xFF064E3B) else CardSurface, RoundedCornerShape(14.dp))
-                                        .border(1.dp, if (isWakeRunning) Color(0xFF34D399) else Silver.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
-                                        .padding(14.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("24/7 Background Voice Assistant", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                        Text(
-                                            if (isWakeRunning) "● Active • App বন্ধ থাকলেও ভয়েস কমান্ডে কাজ করবে ও মুখে বলবে"
-                                            else "○ Inactive • App কেটে দিলেও ভয়েস চালু রাখতে Always Allow চাপুন",
-                                            color = if (isWakeRunning) Color(0xFF34D399) else Silver,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                    Button(
-                                        onClick = {
-                                            if (isWakeRunning) {
-                                                WakeWordForegroundService.stop(context)
-                                            } else if (!hasMic) {
-                                                micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                            } else {
-                                                WakeWordForegroundService.start(context)
-                                                runCatching {
-                                                    val powerIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                                        data = Uri.parse("package:${context.packageName}")
-                                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                    }
-                                                    context.startActivity(powerIntent)
-                                                }
-                                                runCatching {
-                                                    val appSettingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                                        data = Uri.parse("package:${context.packageName}")
-                                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                    }
-                                                    context.startActivity(appSettingsIntent)
-                                                }
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isWakeRunning) Color(0xFFDC2626) else ElectricBlue
-                                        )
-                                    ) {
-                                        Text(if (isWakeRunning) "Stop" else "Always Allow", fontSize = 11.sp)
-                                    }
-                                }
-                            }
-
-                            // Phone Control Status
-                            item {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(CardSurface, RoundedCornerShape(14.dp))
-                                        .padding(14.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Phone Control (Accessibility)", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                        val isAccEnabled = isAccessibilityActive || isAccessibilityConnected
-                                        Text(
-                                            if (isAccEnabled) "Active • Ready for system gestures" else "Not Enabled",
-                                            color = if (isAccEnabled) Color(0xFF34D399) else Color(0xFFFBBF24),
-                                            fontSize = 12.sp
-                                        )
-                                    }
-                                    OutlinedButton(onClick = {
-                                        context.startActivity(
-                                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        )
-                                    }) {
-                                        val isAccEnabled = isAccessibilityActive || isAccessibilityConnected
-                                        Text(if (isAccEnabled) "Settings" else "Enable")
-                                    }
-                                }
-                            }
-
-                            // Storage Info & Import Card
-                            item {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(CardSurface, RoundedCornerShape(14.dp))
-                                        .padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    val usedMb = modelStore.getTotalStorageUsedBytes() / (1024 * 1024)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("Offline Models Storage", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                        Text("${usedMb} MB Used", color = ElectricBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-
-                                    Text(
-                                        "Download verified models below or import any downloaded .bin / .task / .gguf model directly from phone storage.",
-                                        color = Silver,
-                                        fontSize = 11.sp
-                                    )
-
-                                    Button(
-                                        onClick = { modelFilePicker.launch("*/*") },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("📁 Import Model from Phone Downloads")
-                                    }
-
-                                    if (modelImportNote.isNotBlank()) {
-                                        Text(modelImportNote, color = Color(0xFF34D399), fontSize = 12.sp)
-                                    }
-                                }
-                            }
-
-                            // Catalog Models (Offline Voice Engine permanently removed; 100% Online Human Voice active)
-                            items(models, key = { it.spec.id }) { item ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(CardSurface, RoundedCornerShape(14.dp))
-                                        .padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(item.spec.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        if (item.installed) {
-                                            Text(
-                                                "✓ Installed",
-                                                color = Color(0xFF34D399),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        val badgeBg = if (item.spec.isGated) Color(0xFF78350F) else Color(0xFF064E3B)
-                                        val badgeFg = if (item.spec.isGated) Color(0xFFFBBF24) else Color(0xFF34D399)
-                                        Box(
-                                            modifier = Modifier
-                                                .background(badgeBg, RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(item.spec.badge, color = badgeFg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                        Text(
-                                            "${item.spec.type} • ~${item.spec.approxSizeMb} MB • RAM: ${item.spec.minRamGb}GB+",
-                                            color = Silver,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-
-                                    Text(
-                                        item.spec.language,
-                                        color = Silver.copy(alpha = 0.85f),
-                                        fontSize = 11.sp
-                                    )
-
-                                    if (item.isDownloading) {
-                                        LinearProgressIndicator(
-                                            progress = { item.progressPercent / 100f },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            color = ElectricBlue
-                                        )
-                                        val downloadedMb = item.downloadedBytes / (1024 * 1024)
-                                        val totalMb = if (item.totalBytes > 0L) item.totalBytes / (1024 * 1024) else item.spec.approxSizeMb.toLong()
-                                        Text(
-                                            "Downloading: ${item.progressPercent}% (${downloadedMb} MB / ${totalMb} MB)",
-                                            color = ElectricBlue,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-
-                                    if (item.error != null) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(Color(0xFF7F1D1D), RoundedCornerShape(6.dp))
-                                                .padding(10.dp)
-                                        ) {
-                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                Text(
-                                                    "❌ ${item.error}",
-                                                    color = Color(0xFFFCA5A5),
-                                                    fontSize = 11.sp
-                                                )
-                                                Text(
-                                                    "💡 পরামর্শ: কোনো Hugging Face টোকেন বা ঝামেলা ছাড়াই সরাসরি ব্যবহারের জন্য '⚡ 100% Free Direct' চিহ্নিত মডেলগুলো ডাউনলোড করুন।",
-                                                    color = Color(0xFFE2E8F0),
-                                                    fontSize = 10.sp
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        if (item.installed) {
-                                            val isActiveBrain = item.spec.id == activeOfflineModelId
-                                            if (isActiveBrain) {
-                                                Button(
-                                                    onClick = {},
-                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF065F46)),
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("✓ Active Gemma", fontSize = 11.sp, color = Color(0xFF34D399), fontWeight = FontWeight.Bold)
-                                                }
-                                            } else {
-                                                Button(
-                                                    onClick = {
-                                                        activeOfflineModelId = item.spec.id
-                                                        val path = modelStore.getLocalModelFile(item.spec.id)?.absolutePath ?: java.io.File(context.filesDir, "models/${item.spec.fileName}").absolutePath
-                                                        activeOfflineModelPath = path
-                                                        keyVault.saveKey("active_offline_model_id", item.spec.id)
-                                                        keyVault.saveKey("active_offline_model_path", path)
-                                                        scope.launch(Dispatchers.IO) {
-                                                            localLlm.prewarmModel(path)
-                                                        }
-                                                    },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("Select Model", fontSize = 11.sp)
-                                                }
-                                            }
-                                            OutlinedButton(
-                                                onClick = { modelStore.deleteModel(item.spec.id) },
-                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                                            ) {
-                                                Text("🗑️ Delete", fontSize = 11.sp)
-                                            }
-                                        } else if (item.isDownloading) {
-                                            OutlinedButton(
-                                                onClick = { modelStore.cancelDownload(item.spec.id) },
-                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFBBF24))
-                                            ) {
-                                                Text("Cancel")
-                                            }
-                                        } else {
-                                            Button(onClick = {
-                                                val job = scope.launch {
-                                                    modelStore.downloadModel(item.spec.id, hfToken = hfToken)
-                                                }
-                                                modelStore.registerJob(item.spec.id, job)
-                                            }) {
-                                                Text(if (item.error != null) "Retry Download" else "Download (~${item.spec.approxSizeMb} MB)")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
                     "settings" -> {
                         var geminiInput by remember { mutableStateOf(keyVault.getKey("gemini_api_key")) }
                         var statusMsg by remember { mutableStateOf(keyVault.getKey("gemini_status_msg")) }
                         var isVerified by remember { mutableStateOf(keyVault.getKey("gemini_api_status") == "verified") }
                         var isValidating by remember { mutableStateOf(false) }
-
-                        val storedModels = keyVault.getKey("gemini_discovered_models")
-                            .split(",")
-                            .map { it.removePrefix("models/").trim() }
-                            .filter { it.isNotBlank() && it != "gemini-exp-1206" && !it.contains("-exp") && !it.contains("gemini-4-") }
-                        var discoveredModels by remember {
-                            mutableStateOf(if (storedModels.isNotEmpty()) storedModels else GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS)
-                        }
-                        var selectedFlash by remember {
-                            val initial = keyVault.getKey("gemini_flash_model").removePrefix("models/").trim()
-                            val clean = if (initial.isBlank() || initial == "gemini-exp-1206" || initial.contains("-exp")) {
-                                GeminiNativeClient.DEFAULT_FLASH_MODEL
-                            } else {
-                                initial
-                            }
-                            mutableStateOf(clean)
-                        }
-                        var selectedPro by remember {
-                            val initial = keyVault.getKey("gemini_pro_model").removePrefix("models/").trim()
-                            val clean = if (initial.isBlank() || initial == "gemini-exp-1206" || initial.contains("-exp")) {
-                                GeminiNativeClient.DEFAULT_PRO_MODEL
-                            } else {
-                                initial
-                            }
-                            mutableStateOf(clean)
-                        }
-                        var flashDropdownOpen by remember { mutableStateOf(false) }
-                        var proDropdownOpen by remember { mutableStateOf(false) }
+                        var lastSyncedKey by remember { mutableStateOf(if (isVerified) geminiInput.trim() else "") }
 
                         val runLiveValidation: (String) -> Unit = { keyToValidate ->
                             val clean = keyToValidate.trim()
                             if (clean.isNotBlank()) {
                                 keyVault.saveKey("gemini_api_key", clean)
                                 isValidating = true
-                                statusMsg = "Connecting to Google AI Studio..."
+                                statusMsg = "Detecting latest Gemini models from your API key..."
                                 scope.launch {
                                     val res = geminiClient.discoverModels(clean)
                                     isValidating = false
                                     res.onSuccess { disc ->
+                                        val bestFlash = disc.bestFlashModel.removePrefix("models/").trim()
+                                        val bestPro = disc.bestProModel.removePrefix("models/").trim()
+                                        val liveIds = disc.models.map { it.id.removePrefix("models/").trim() }.distinct()
+
                                         isVerified = true
-                                        statusMsg = "API Key Verified • ${disc.models.size} models detected"
-                                        val validModels = disc.models.map { it.id.removePrefix("models/").trim() }
-                                            .filter { it != "gemini-exp-1206" && !it.contains("-exp") }
-                                        val combined = (listOf(GeminiNativeClient.DEFAULT_FLASH_MODEL, GeminiNativeClient.DEFAULT_PRO_MODEL) + validModels + GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS).distinct()
-                                        discoveredModels = combined
-                                        selectedFlash = disc.bestFlashModel.removePrefix("models/").trim()
-                                        selectedPro = disc.bestProModel.removePrefix("models/").trim()
+                                        lastSyncedKey = clean
+                                        activeGeminiFlash = bestFlash
+                                        activeGeminiPro = bestPro
+                                        autoDiscoveredGeminiModels = liveIds
+                                        statusMsg = "Auto-Synced • ${liveIds.size} latest models active ($bestFlash)"
 
                                         keyVault.saveKey("gemini_api_key", clean)
                                         keyVault.saveKey("gemini_api_status", "verified")
                                         keyVault.saveKey("gemini_status_msg", statusMsg)
-                                        keyVault.saveKey("gemini_discovered_models", discoveredModels.joinToString(","))
-                                        keyVault.saveKey("gemini_flash_model", selectedFlash)
-                                        keyVault.saveKey("gemini_pro_model", selectedPro)
+                                        keyVault.saveKey("gemini_discovered_models", liveIds.joinToString(","))
+                                        keyVault.saveKey("gemini_flash_model", bestFlash)
+                                        keyVault.saveKey("gemini_pro_model", bestPro)
+                                        if (jarvisPrefs.state.value.aiProviderPreset == "gemini") {
+                                            jarvisPrefs.update { it.copy(aiCustomModel = bestFlash) }
+                                        }
+                                        voiceController.setApiKeys(clean, keyVault.getKey("elevenlabs_api_key"), isNetworkAvailable())
                                     }.onFailure { err ->
-                                        // Fallback test with selected model
                                         val diag = geminiClient.testAiConnection(
                                             geminiKey = clean,
-                                            selectedModel = selectedFlash
+                                            selectedModel = ""
                                         )
                                         if (diag.contains("Connected") || diag.contains("Ready")) {
+                                            val autoPicked = geminiClient.cachedBestFlash
                                             isVerified = true
+                                            lastSyncedKey = clean
+                                            activeGeminiFlash = autoPicked
+                                            activeGeminiPro = geminiClient.cachedBestPro
+                                            autoDiscoveredGeminiModels = geminiClient.cachedDiscoveredModels
+                                                .ifEmpty { listOf(autoPicked) }
                                             statusMsg = diag
-                                            discoveredModels = GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS
                                             keyVault.saveKey("gemini_api_status", "verified")
                                             keyVault.saveKey("gemini_status_msg", statusMsg)
-                                            keyVault.saveKey("gemini_discovered_models", discoveredModels.joinToString(","))
-                                            keyVault.saveKey("gemini_flash_model", selectedFlash)
-                                            keyVault.saveKey("gemini_pro_model", selectedPro)
+                                            keyVault.saveKey("gemini_discovered_models", autoDiscoveredGeminiModels.joinToString(","))
+                                            keyVault.saveKey("gemini_flash_model", activeGeminiFlash)
+                                            keyVault.saveKey("gemini_pro_model", activeGeminiPro)
+                                            if (jarvisPrefs.state.value.aiProviderPreset == "gemini") {
+                                                jarvisPrefs.update { it.copy(aiCustomModel = activeGeminiFlash) }
+                                            }
+                                            voiceController.setApiKeys(clean, keyVault.getKey("elevenlabs_api_key"), isNetworkAvailable())
                                         } else {
                                             isVerified = false
-                                            statusMsg = "Validation failed: ${err.message?.take(120)}"
+                                            statusMsg = "Validation failed: ${err.message?.take(120) ?: diag}"
                                             keyVault.saveKey("gemini_api_status", "invalid")
                                             keyVault.saveKey("gemini_status_msg", statusMsg)
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        // Auto-detect & sync models automatically as soon as an AIza... API key is typed or pasted
+                        LaunchedEffect(geminiInput) {
+                            val clean = geminiInput.trim()
+                            if (clean.startsWith("AIza") && clean.length >= 35 && clean != lastSyncedKey && !isValidating) {
+                                kotlinx.coroutines.delay(450L)
+                                val currentClean = geminiInput.trim()
+                                if (currentClean == clean && currentClean != lastSyncedKey) {
+                                    runLiveValidation(currentClean)
                                 }
                             }
                         }
@@ -1949,13 +1545,13 @@ fun ZeeNativeApp(
                             verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
                             Text(
-                                "Google AI Studio API Key & Live Model Discovery",
+                                "Google AI Studio API Key (Auto Model Sync)",
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 16.sp
                             )
                             Text(
-                                "Paste your Google AI Studio API key (AIza...). The key is validated live and modern models are auto-detected without deprecated IDs.",
+                                "Google AI Studio API key (AIza...) বসালেই অটোমেটিক লেটেস্ট কাজের মডেলগুলো যুক্ত হয়ে যাবে — ম্যানুয়াল সিলেক্ট করার দরকার নেই।",
                                 color = Silver,
                                 fontSize = 12.sp
                             )
@@ -1967,9 +1563,8 @@ fun ZeeNativeApp(
                                     val clean = newVal.trim()
                                     if (clean.isNotBlank()) {
                                         keyVault.saveKey("gemini_api_key", clean)
-                                    }
-                                    if (clean.startsWith("AIza") && clean.length >= 39) {
-                                        runLiveValidation(clean)
+                                    } else {
+                                        lastSyncedKey = ""
                                     }
                                 },
                                 visualTransformation = PasswordVisualTransformation(),
@@ -1995,9 +1590,9 @@ fun ZeeNativeApp(
                                             strokeWidth = 2.dp
                                         )
                                         Spacer(Modifier.width(6.dp))
-                                        Text("Validating...")
+                                        Text("Syncing...")
                                     } else {
-                                        Text("Validate & Discover")
+                                        Text(if (isVerified) "Re-Sync Latest" else "Detect & Connect")
                                     }
                                 }
 
@@ -2008,20 +1603,23 @@ fun ZeeNativeApp(
                                             if (clean.isNotBlank()) {
                                                 keyVault.saveKey("gemini_api_key", clean)
                                             }
-                                            statusMsg = "Testing selected model ($selectedFlash)..."
+                                            statusMsg = "Testing live AI connection..."
                                             val diag = geminiClient.testAiConnection(
                                                 geminiKey = clean,
-                                                selectedModel = selectedFlash,
+                                                selectedModel = activeGeminiFlash,
                                                 groqKey = keyVault.getKey("groq_api_key"),
                                                 openRouterKey = keyVault.getKey("openrouter_api_key")
                                             )
                                             statusMsg = diag
-                                            if (diag.contains("Switched to Active:")) {
-                                                val candidate = diag.substringAfter("Switched to Active: ").substringBefore(" ").trim()
-                                                if (candidate.isNotBlank()) {
-                                                    selectedFlash = candidate
-                                                    keyVault.saveKey("gemini_flash_model", candidate)
+                                            if (geminiClient.cachedBestFlash.isNotBlank()) {
+                                                activeGeminiFlash = geminiClient.cachedBestFlash
+                                                activeGeminiPro = geminiClient.cachedBestPro
+                                                if (geminiClient.cachedDiscoveredModels.isNotEmpty()) {
+                                                    autoDiscoveredGeminiModels = geminiClient.cachedDiscoveredModels
+                                                    keyVault.saveKey("gemini_discovered_models", autoDiscoveredGeminiModels.joinToString(","))
                                                 }
+                                                keyVault.saveKey("gemini_flash_model", activeGeminiFlash)
+                                                keyVault.saveKey("gemini_pro_model", activeGeminiPro)
                                             }
                                             if (diag.contains("Connected") || diag.contains("Ready")) {
                                                 isVerified = true
@@ -2032,19 +1630,25 @@ fun ZeeNativeApp(
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
                                 ) {
-                                    Text("Test Connection")
+                                    Text("Test")
                                 }
 
-                                if (isVerified) {
+                                if (geminiInput.isNotBlank() || isVerified) {
                                     TextButton(onClick = {
                                         geminiInput = ""
+                                        lastSyncedKey = ""
                                         isVerified = false
                                         statusMsg = ""
-                                        discoveredModels = emptyList()
+                                        autoDiscoveredGeminiModels = emptyList()
+                                        activeGeminiFlash = GeminiNativeClient.DEFAULT_FLASH_MODEL
+                                        activeGeminiPro = GeminiNativeClient.DEFAULT_PRO_MODEL
+                                        geminiClient.clearDiscoveryCache()
                                         keyVault.removeKey("gemini_api_key")
                                         keyVault.removeKey("gemini_api_status")
                                         keyVault.removeKey("gemini_status_msg")
                                         keyVault.removeKey("gemini_discovered_models")
+                                        keyVault.removeKey("gemini_flash_model")
+                                        keyVault.removeKey("gemini_pro_model")
                                     }) {
                                         Text("Clear", color = Color(0xFFEF4444))
                                     }
@@ -2069,212 +1673,69 @@ fun ZeeNativeApp(
                                 }
                             }
 
-                            if (discoveredModels.isNotEmpty()) {
-                                HorizontalDivider(color = Color(0xFF1E293B))
-
-                                Text("Active Model Selectors", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    OutlinedButton(
-                                        onClick = { flashDropdownOpen = true },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-                                            Text("Fast Model (Voice & Companion Chat)", fontSize = 11.sp, color = Silver)
-                                            Text(selectedFlash, fontSize = 14.sp, color = ElectricBlue, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                    DropdownMenu(
-                                        expanded = flashDropdownOpen,
-                                        onDismissRequest = { flashDropdownOpen = false }
-                                    ) {
-                                        val flashList = (listOf(GeminiNativeClient.DEFAULT_FLASH_MODEL) + (discoveredModels + GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS).filter { GeminiNativeClient.isValidChatModel(it) }).distinct()
-                                        flashList.forEach { modelId ->
-                                            DropdownMenuItem(
-                                                text = { Text(modelId) },
-                                                onClick = {
-                                                    selectedFlash = modelId
-                                                    keyVault.saveKey("gemini_flash_model", modelId)
-                                                    flashDropdownOpen = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    OutlinedButton(
-                                        onClick = { proDropdownOpen = true },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-                                            Text("Pro Model (Filmmaker, Research & Council)", fontSize = 11.sp, color = Silver)
-                                            Text(selectedPro, fontSize = 14.sp, color = Color(0xFFA78BFA), fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                    DropdownMenu(
-                                        expanded = proDropdownOpen,
-                                        onDismissRequest = { proDropdownOpen = false }
-                                    ) {
-                                        val proList = (listOf(GeminiNativeClient.DEFAULT_PRO_MODEL) + (discoveredModels + GeminiNativeClient.ALL_KNOWN_GEMINI_MODELS).filter { GeminiNativeClient.isValidChatModel(it) }).distinct()
-                                        proList.forEach { modelId ->
-                                            DropdownMenuItem(
-                                                text = { Text(modelId) },
-                                                onClick = {
-                                                    selectedPro = modelId
-                                                    keyVault.saveKey("gemini_pro_model", modelId)
-                                                    proDropdownOpen = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-
-                                HorizontalDivider(color = Color(0xFF1E293B))
-
-                                Text("Offline Brain Model (On-Device Gemma)", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                Row(
+                            if (isVerified || autoDiscoveredGeminiModels.isNotEmpty()) {
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .background(Color(0xFF0F172A), RoundedCornerShape(10.dp))
-                                        .border(1.dp, Color(0xFF334155), RoundedCornerShape(10.dp))
+                                        .border(1.dp, Cyan.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                                         .padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    val activeSpec = models.firstOrNull { it.spec.id == activeOfflineModelId }?.spec
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            activeSpec?.name ?: "No Offline Model Selected",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp
-                                        )
-                                        Text(
-                                            if (activeSpec != null) "● Active On-Device • ~${activeSpec.approxSizeMb} MB" else "Download & select a model from Models tab",
-                                            color = if (activeSpec != null) Color(0xFF34D399) else Silver,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                    Button(
-                                        onClick = { activeTab = "models" },
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                                    ) {
-                                        Text("Manage Brain", fontSize = 11.sp)
-                                    }
-                                }
-                            }
-
-                            HorizontalDivider(color = Color(0xFF1E293B))
-
-                            Text("Hugging Face Access Token (Zero-Gate Connect)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                            Text("Connect your free Hugging Face User Access Token (read permissions) to download gated models with 100% verified authorization.", color = Silver, fontSize = 11.sp)
-
-                            var hfTokenInput by remember { mutableStateOf(keyVault.getKey("hf_token")) }
-                            var hfStatusMsg by remember { mutableStateOf(keyVault.getKey("hf_status_msg")) }
-                            var isHfConnected by remember { mutableStateOf(keyVault.getKey("hf_token_status") == "connected") }
-                            var isHfValidating by remember { mutableStateOf(false) }
-
-                            OutlinedTextField(
-                                value = hfTokenInput,
-                                onValueChange = { hfTokenInput = it },
-                                visualTransformation = PasswordVisualTransformation(),
-                                placeholder = { Text("hf_...") },
-                                label = { Text("Hugging Face User Access Token") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-
-                            Spacer(Modifier.height(4.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Button(
-                                    onClick = {
-                                        val clean = hfTokenInput.trim()
-                                        if (clean.isNotBlank()) {
-                                            isHfValidating = true
-                                            hfStatusMsg = "Verifying Hugging Face Token..."
-                                            scope.launch {
-                                                val res = modelStore.verifyHuggingFaceToken(clean)
-                                                isHfValidating = false
-                                                res.onSuccess { username ->
-                                                    isHfConnected = true
-                                                    hfStatusMsg = "Success: Connected as @$username (Hugging Face Verified)"
-                                                    keyVault.saveKey("hf_token", clean)
-                                                    keyVault.saveKey("hf_token_status", "connected")
-                                                    keyVault.saveKey("hf_status_msg", hfStatusMsg)
-                                                }.onFailure { err ->
-                                                    isHfConnected = false
-                                                    hfStatusMsg = "Connection failed: ${err.message ?: "Invalid Token"}"
-                                                    keyVault.saveKey("hf_token_status", "invalid")
-                                                    keyVault.saveKey("hf_status_msg", hfStatusMsg)
-                                                }
-                                            }
-                                        }
-                                    },
-                                    enabled = !isHfValidating && hfTokenInput.isNotBlank()
-                                ) {
-                                    if (isHfValidating) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            color = Color.White,
-                                            strokeWidth = 2.dp
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Verifying...")
-                                    } else {
-                                        Text(if (isHfConnected) "Connected (Success)" else "Connect Hugging Face")
-                                    }
-                                }
-
-                                if (isHfConnected) {
-                                    TextButton(onClick = {
-                                        hfTokenInput = ""
-                                        isHfConnected = false
-                                        hfStatusMsg = ""
-                                        keyVault.removeKey("hf_token")
-                                        keyVault.removeKey("hf_token_status")
-                                        keyVault.removeKey("hf_status_msg")
-                                    }) {
-                                        Text("Disconnect", color = Color(0xFFEF4444))
-                                    }
-                                }
-                            }
-
-                            if (hfStatusMsg.isNotBlank()) {
-                                val hfBadgeBg = if (isHfConnected) Color(0xFF064E3B) else Color(0xFF7F1D1D)
-                                val hfBadgeFg = if (isHfConnected) Color(0xFF34D399) else Color(0xFFFCA5A5)
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(hfBadgeBg, RoundedCornerShape(8.dp))
-                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Text(
-                                        text = (if (isHfConnected) "● " else "▲ ") + hfStatusMsg,
-                                        color = hfBadgeFg,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
+                                        "✨ Auto-Selected Latest Models (Zero Manual Setup)",
+                                        color = Cyan,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
                                     )
+                                    Text("⚡ Fast & Phone Control: $activeGeminiFlash", color = Color.White, fontSize = 11.5.sp)
+                                    Text("🧠 Pro Studio & Research: $activeGeminiPro", color = Color(0xFFC4B5FD), fontSize = 11.5.sp)
+                                    if (autoDiscoveredGeminiModels.isNotEmpty()) {
+                                        Text(
+                                            "Auto-failover pool: ${autoDiscoveredGeminiModels.take(6).joinToString(", ")}",
+                                            color = Silver.copy(alpha = 0.8f),
+                                            fontSize = 10.sp
+                                        )
+                                    }
                                 }
                             }
 
-                            Box(
+                            val isWakeRunning by WakeWordEventBus.isRunning.collectAsState()
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color(0xFF0F172A), RoundedCornerShape(10.dp))
-                                    .border(1.dp, Color(0xFF334155), RoundedCornerShape(10.dp))
-                                    .padding(12.dp)
+                                    .background(if (isWakeRunning) Color(0xFF064E3B) else Color(0xFF0F172A), RoundedCornerShape(10.dp))
+                                    .border(1.dp, if (isWakeRunning) Color(0xFF34D399) else Color(0xFF334155), RoundedCornerShape(10.dp))
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    "💡 Hugging Face গাইড: Hugging Face-এর অফিসিয়াল গুগল মডেল (যেমন Gemma 12B/27B) 'Gated' থাকে, যার জন্য টোকেন থাকা সত্ত্বেও ব্রাউজারে huggingface.co-তে লগইন করে মডেল পেইজে 'Acknowledge license' বাটনে একবার ক্লিক করতে হয়। কোনো টোকেন বা ঝামেলা ছাড়া সরাসরি ব্যবহারের জন্য 'মডেল ও কন্ট্রোল' ট্যাবে থাকা '⚡ 100% Free Direct' Gemma মডেলগুলো ডাউনলোড করুন।",
-                                    color = Silver,
-                                    fontSize = 11.sp
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("24/7 Background Wake Word", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Text(
+                                        if (isWakeRunning) "● Active • Hey ZEE / Hey ZHEE শোনা চলছে"
+                                        else "○ Off • ব্যাকগ্রাউন্ডে ভয়েস চালু রাখতে Enable করুন",
+                                        color = if (isWakeRunning) Color(0xFF34D399) else Silver,
+                                        fontSize = 10.5.sp
+                                    )
+                                }
+                                Button(
+                                    onClick = {
+                                        if (isWakeRunning) {
+                                            WakeWordForegroundService.stop(context)
+                                        } else if (!hasMic) {
+                                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        } else {
+                                            WakeWordForegroundService.start(context)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isWakeRunning) Color(0xFFDC2626) else ElectricBlue
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(if (isWakeRunning) "Stop" else "Enable", fontSize = 11.sp)
+                                }
                             }
 
                             HorizontalDivider(color = Color(0xFF1E293B))
@@ -2350,7 +1811,7 @@ fun ZeeNativeApp(
                                 onValueChange = {
                                     elevenLabsInput = it
                                     keyVault.saveKey("elevenlabs_api_key", it.trim())
-                                    voiceController.setApiKeys(activeGeminiKey, it.trim(), !forceOfflineMode && isNetworkAvailable())
+                                    voiceController.setApiKeys(activeGeminiKey, it.trim(), isNetworkAvailable())
                                 },
                                 visualTransformation = PasswordVisualTransformation(),
                                 placeholder = { Text("xi-api-key...") },
