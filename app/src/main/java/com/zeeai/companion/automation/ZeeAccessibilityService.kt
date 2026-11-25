@@ -49,6 +49,15 @@ class ZeeAccessibilityService : AccessibilityService() {
         fun currentForegroundPackage(): String =
             instance?.getForegroundPackageName().orEmpty()
 
+        fun captureScreenMap(): InteractiveScreenMap? =
+            instance?.captureInteractiveScreenMap()
+
+        fun performClickNodeIndex(index: Int): Boolean =
+            instance?.clickCapturedNode(index) ?: false
+
+        fun performTypeNodeIndex(index: Int, text: String, submitAfter: Boolean): Boolean =
+            instance?.typeIntoCapturedNode(index, text, submitAfter) ?: false
+
         /**
          * Isolated :control process-এ থাকা অবস্থাতেও মেইন অ্যাপ থেকে সঠিকভাবে Enabled স্ট্যাটাস চেক করে
          */
@@ -704,5 +713,124 @@ class ZeeAccessibilityService : AccessibilityService() {
         }
         extract(root, 0)
         return sb.toString().take(maxChars)
+    }
+
+    data class UiNodeSnapshot(
+        val index: Int,
+        val label: String,
+        val resourceId: String,
+        val isClickable: Boolean,
+        val isEditable: Boolean,
+        val centerX: Int,
+        val centerY: Int
+    )
+
+    data class InteractiveScreenMap(
+        val packageName: String,
+        val summaryText: String,
+        val nodes: List<UiNodeSnapshot>,
+        val formattedForAi: String
+    )
+
+    @Volatile
+    private var lastCapturedNodes: List<AccessibilityNodeInfo> = emptyList()
+
+    fun captureInteractiveScreenMap(): InteractiveScreenMap {
+        val root = findBestForegroundWindowRoot()
+            ?: return InteractiveScreenMap("", "", emptyList(), "NO_FOREGROUND_WINDOW")
+        val pkg = root.packageName?.toString().orEmpty()
+        val snapshots = mutableListOf<UiNodeSnapshot>()
+        val rawNodes = mutableListOf<AccessibilityNodeInfo>()
+        val textSnippets = mutableListOf<String>()
+        val rect = Rect()
+
+        fun traverse(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || depth > 28 || snapshots.size >= 55) return
+            if (node.isVisibleToUser) {
+                val txt = node.text?.toString()?.trim().orEmpty()
+                val desc = node.contentDescription?.toString()?.trim().orEmpty()
+                val cls = node.className?.toString().orEmpty()
+                val hint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) node.hintText?.toString()?.trim().orEmpty() else ""
+                val vid = node.viewIdResourceName?.substringAfterLast("/")?.trim().orEmpty()
+                val isEdit = node.isEditable || cls.contains("EditText", true) || cls.contains("AutoComplete", true)
+                val isClickable = node.isClickable || node.isCheckable
+
+                val combinedLabel = listOf(txt, desc, hint).firstOrNull { it.isNotBlank() }.orEmpty()
+                if (combinedLabel.isNotBlank() && textSnippets.size < 35) {
+                    textSnippets.add(combinedLabel.take(80))
+                }
+
+                if (isClickable || isEdit) {
+                    node.getBoundsInScreen(rect)
+                    if (rect.width() > 8 && rect.height() > 8) {
+                        val idx = snapshots.size
+                        snapshots.add(
+                            UiNodeSnapshot(
+                                index = idx,
+                                label = combinedLabel.ifBlank { vid.ifBlank { cls.substringAfterLast(".") } }.take(64),
+                                resourceId = vid.take(36),
+                                isClickable = isClickable,
+                                isEditable = isEdit,
+                                centerX = rect.centerX(),
+                                centerY = rect.centerY()
+                            )
+                        )
+                        rawNodes.add(node)
+                    }
+                }
+            }
+            for (i in 0 until node.childCount) {
+                if (snapshots.size >= 55) break
+                traverse(node.getChild(i), depth + 1)
+            }
+        }
+        traverse(root, 0)
+        lastCapturedNodes = rawNodes
+
+        val formatted = buildString {
+            appendLine("FOREGROUND_APP: $pkg")
+            appendLine("INTERACTIVE_NODES:")
+            snapshots.forEach { n ->
+                val kind = if (n.isEditable) "INPUT" else "BTN"
+                appendLine("[${n.index}] $kind label=\"${n.label}\" id=\"${n.resourceId}\" xy=(${n.centerX},${n.centerY})")
+            }
+            appendLine("SCREEN_TEXT: ${textSnippets.joinToString(" | ").take(1400)}")
+        }
+        return InteractiveScreenMap(pkg, textSnippets.joinToString(" | "), snapshots, formatted)
+    }
+
+    fun clickCapturedNode(index: Int): Boolean {
+        val node = lastCapturedNodes.getOrNull(index) ?: return false
+        if (clickNearestClickable(node)) return true
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        if (rect.centerX() > 0 && rect.centerY() > 0) {
+            return clickAtXY(rect.centerX().toFloat(), rect.centerY().toFloat())
+        }
+        return false
+    }
+
+    fun typeIntoCapturedNode(index: Int, text: String, submitAfter: Boolean): Boolean {
+        val node = lastCapturedNodes.getOrNull(index) ?: return false
+        val ok = setTextOnNode(node, text)
+        if (!ok) {
+            val rect = Rect()
+            node.getBoundsInScreen(rect)
+            if (rect.centerX() > 0 && rect.centerY() > 0) {
+                clickAtXY(rect.centerX().toFloat(), rect.centerY().toFloat())
+            }
+        }
+        if (ok && submitAfter) {
+            mainHandler.postDelayed({
+                val clicked = clickActionButton(
+                    keywords = listOf("send", "search", "post", "publish", "go", "submit", "পাঠান", "পোস্ট", "সার্চ"),
+                    idHints = listOf("send", "send_btn", "search_go_btn", "search_button", "post", "submit")
+                )
+                if (!clicked) {
+                    performImeEnter(findBestForegroundWindowRoot()?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: node)
+                }
+            }, 380L)
+        }
+        return ok
     }
 }
