@@ -93,7 +93,7 @@ fun PhoneControlScreen(
             is PhoneCommandOutcome.Executed -> {
                 torchState = phoneCommander.isTorchActive()
                 actionLogs.add(0, PhoneActionLog(command = clean, result = outcome.replyText))
-                voiceController.speak(outcome.replyText, voiceProfile)
+                voiceController.speak(outcome.replyText, voiceProfile, online = isNetworkAvailable())
                 return
             }
             is PhoneCommandOutcome.NeedsConfirmation -> {
@@ -106,7 +106,7 @@ fun PhoneControlScreen(
         val offlineOutcome = offlinePhoneController?.tryInstantOfflineCommand(clean)
         if (offlineOutcome != null && offlineOutcome.handled) {
             actionLogs.add(0, PhoneActionLog(command = clean, result = offlineOutcome.reply))
-            voiceController.speak(offlineOutcome.reply, voiceProfile)
+            voiceController.speak(offlineOutcome.reply, voiceProfile, online = isNetworkAvailable())
             return
         }
 
@@ -145,6 +145,10 @@ fun PhoneControlScreen(
         if (!voiceController.hasMicPermission() && !hasMic) {
             onRequestMic()
             return
+        }
+        // Release continuous recognizer first so system Google Voice Popup doesn't hit mic busy
+        if (voiceController.isMicLockedOn.value) {
+            voiceController.stopListening(resumeWakeWord = false)
         }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
