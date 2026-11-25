@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zeeai.companion.ai.GeminiNativeClient
 import com.zeeai.companion.data.local.SecureKeyVault
-import com.zeeai.companion.offline.LocalLlmInferenceEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,7 +38,6 @@ fun UniversalReaderScreen(
     activeCharId: String,
     keyVault: SecureKeyVault,
     geminiClient: GeminiNativeClient,
-    localLlm: LocalLlmInferenceEngine,
     isOnline: () -> Boolean
 ) {
     val context = LocalContext.current
@@ -170,43 +168,13 @@ fun UniversalReaderScreen(
                 }
                 busy = false
             } else {
-                // Offline Execution Path
-                if (file.kind == NativeFileKind.MULTIMODAL) {
-                    statusText =
-                        "PDF, Image, Audio, and Video AI analysis requires internet + Gemini API key."
-                    busy = false
-                    return@launch
-                }
-
+                // Offline Local Preview (Online Gemini required for AI summary/translation)
                 val textContent = file.extractedText.orEmpty()
-                val installedId = localLlm.findFirstInstalledMediaPipeModelId()
-                if (installedId != null && textContent.isNotBlank()) {
-                    val acc = StringBuilder()
-                    statusText = "Analyzing offline using local LLM ($installedId)..."
-                    localLlm.streamResponse(
-                        modelId = installedId,
-                        systemInstruction = sysInstruction,
-                        userPrompt = "$taskDirective\n\nDocument (${file.displayName}):\n${textContent.take(3500)}",
-                        onToken = { tok, done ->
-                            acc.append(tok)
-                            scope.launch(Dispatchers.Main) {
-                                outputText = acc.toString()
-                                if (done) {
-                                    statusText = "Completed offline via Local LLM."
-                                    busy = false
-                                }
-                            }
-                        },
-                        onError = { err ->
-                            scope.launch(Dispatchers.Main) {
-                                statusText = "Offline LLM error: $err"
-                                busy = false
-                            }
-                        }
-                    )
+                if (file.kind == NativeFileKind.MULTIMODAL) {
+                    statusText = "PDF, Image, Audio, and Video AI analysis requires internet + Google AI Studio API key."
                 } else {
                     outputText = buildString {
-                        append("[Offline Local Reader • ${file.displayName}]\n")
+                        append("[Local Document Preview • ${file.displayName}]\n")
                         append("Characters: ${textContent.length}\n")
                         if (file.subtitleCueCount != null) {
                             append("Subtitles: ${file.subtitleCueCount} cues (ends ${file.subtitleDurationEnd})\n")
@@ -214,9 +182,9 @@ fun UniversalReaderScreen(
                         append("\n--- Local Text Preview ---\n")
                         append(textContent.take(3500))
                     }
-                    statusText = "Displayed local offline text (no internet or downloaded LLM)."
-                    busy = false
+                    statusText = "Offline preview shown. Connect to internet + Gemini API key for AI analysis."
                 }
+                busy = false
             }
         }
     }
@@ -371,7 +339,6 @@ fun UniversalReaderScreen(
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = {
                         geminiClient.cancelActive()
-                        localLlm.cancelActiveGeneration()
                         busy = false
                         statusText = "Cancelled."
                     }) {
