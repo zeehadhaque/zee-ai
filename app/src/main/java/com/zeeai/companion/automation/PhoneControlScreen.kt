@@ -1,9 +1,14 @@
 package com.zeeai.companion.automation
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -54,6 +59,7 @@ data class PhoneActionLog(
 fun PhoneControlScreen(
     context: Context,
     phoneCommander: NativePhoneCommander,
+    offlinePhoneController: OfflineAutonomousPhoneController? = null,
     voiceController: NativeVoiceController,
     voiceProfile: NativeVoiceProfile,
     isNetworkAvailable: () -> Boolean,
@@ -64,14 +70,19 @@ fun PhoneControlScreen(
     activeCharId: String,
     onCharChanged: (String) -> Unit,
     onGeneralPrompt: (String) -> Unit,
+    onGeneralPromptWithReply: ((String, (String) -> Unit) -> Unit)? = null,
     onShowConfirmation: (PendingConfirmation) -> Unit
 ) {
     val isMicLockedOn by voiceController.isMicLockedOn.collectAsState()
     val voiceState by voiceController.voiceState.collectAsState()
+    val micRmsLevel by voiceController.micRmsLevel.collectAsState()
+    val micStatusHint by voiceController.statusHint.collectAsState()
+    val micLastError by voiceController.lastError.collectAsState()
 
     var liveVoiceText by remember { mutableStateOf("") }
     var textCommandInput by remember { mutableStateOf("") }
     var torchState by remember { mutableStateOf(phoneCommander.isTorchActive()) }
+    var startAfterMicGrant by remember { mutableStateOf(false) }
     val actionLogs = remember { mutableStateListOf<PhoneActionLog>() }
 
     fun executePhoneCommand(raw: String) {
@@ -83,14 +94,106 @@ fun PhoneControlScreen(
                 torchState = phoneCommander.isTorchActive()
                 actionLogs.add(0, PhoneActionLog(command = clean, result = outcome.replyText))
                 voiceController.speak(outcome.replyText, voiceProfile)
+                return
             }
             is PhoneCommandOutcome.NeedsConfirmation -> {
                 onShowConfirmation(outcome.confirmation)
+                return
             }
-            is PhoneCommandOutcome.NotAPhoneCommand -> {
-                actionLogs.add(0, PhoneActionLog(command = clean, result = "Sent to AI Companion"))
-                onGeneralPrompt(clean)
+            is PhoneCommandOutcome.NotAPhoneCommand -> Unit
+        }
+
+        val offlineOutcome = offlinePhoneController?.tryInstantOfflineCommand(clean)
+        if (offlineOutcome != null && offlineOutcome.handled) {
+            actionLogs.add(0, PhoneActionLog(command = clean, result = offlineOutcome.reply))
+            voiceController.speak(offlineOutcome.reply, voiceProfile)
+            return
+        }
+
+        if (onGeneralPromptWithReply != null) {
+            voiceController.pauseListeningForProcessing()
+            actionLogs.add(0, PhoneActionLog(command = clean, result = "Processing AI command..."))
+            onGeneralPromptWithReply(clean) { reply ->
+                val idx = actionLogs.indexOfFirst { it.command == clean && it.result == "Processing AI command..." }
+                if (idx >= 0) {
+                    actionLogs[idx] = actionLogs[idx].copy(result = reply)
+                } else {
+                    actionLogs.add(0, PhoneActionLog(command = clean, result = reply))
+                }
+                voiceController.resumeListeningAfterProcessing()
             }
+        } else {
+            actionLogs.add(0, PhoneActionLog(command = clean, result = "Sent to AI Companion"))
+            onGeneralPrompt(clean)
+        }
+    }
+
+    val phoneSpeechDialogLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val spoken = matches?.firstOrNull().orEmpty().trim()
+            if (spoken.isNotBlank()) {
+                liveVoiceText = ""
+                executePhoneCommand(spoken)
+            }
+        }
+    }
+
+    fun launchSystemVoicePopup() {
+        if (!voiceController.hasMicPermission() && !hasMic) {
+            onRequestMic()
+            return
+        }
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, voiceProfile.languageTag)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, voiceProfile.languageTag)
+            putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("bn-BD", "en-US", "bn-IN"))
+            putExtra(
+                RecognizerIntent.EXTRA_PROMPT,
+                if (activeCharId == "zhee") "ZHEE Phone Control — বলুন বস" else "ZEE Phone Control — কমান্ড বলুন বস"
+            )
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+        }
+        runCatching { phoneSpeechDialogLauncher.launch(intent) }
+    }
+
+    fun startPhoneControlMic() {
+        liveVoiceText = ""
+        voiceController.startContinuousListening(
+            languageTag = voiceProfile.languageTag,
+            preferOffline = !isNetworkAvailable(),
+            onPartial = { liveVoiceText = it },
+            onFinal = { spokenText ->
+                liveVoiceText = ""
+                if (spokenText.isNotBlank()) {
+                    executePhoneCommand(spokenText)
+                }
+            },
+            onError = { /* handled reactively by voiceController.lastError */ }
+        )
+    }
+
+    val phoneMicPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            onRequestMic()
+            if (startAfterMicGrant) {
+                startAfterMicGrant = false
+                startPhoneControlMic()
+            }
+        } else {
+            startAfterMicGrant = false
+        }
+    }
+
+    DisposableEffect(voiceController) {
+        voiceController.onFallbackToSystemDialog = { launchSystemVoicePopup() }
+        onDispose {
+            voiceController.onFallbackToSystemDialog = null
         }
     }
 
@@ -228,27 +331,16 @@ fun PhoneControlScreen(
             ) {
                 IconButton(
                     onClick = {
-                        if (!hasMic) {
-                            onRequestMic()
+                        if (!hasMic && !voiceController.hasMicPermission()) {
+                            startAfterMicGrant = true
+                            phoneMicPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             return@IconButton
                         }
                         if (isMicLockedOn) {
                             voiceController.stopListening()
                             liveVoiceText = ""
                         } else {
-                            liveVoiceText = ""
-                            voiceController.startContinuousListening(
-                                languageTag = voiceProfile.languageTag,
-                                preferOffline = !isNetworkAvailable(),
-                                onPartial = { liveVoiceText = it },
-                                onFinal = { spokenText ->
-                                    liveVoiceText = ""
-                                    if (spokenText.isNotBlank()) {
-                                        executePhoneCommand(spokenText)
-                                    }
-                                },
-                                onError = { liveVoiceText = it }
-                            )
+                            startPhoneControlMic()
                         }
                     },
                     modifier = Modifier.fillMaxSize()
@@ -260,15 +352,53 @@ fun PhoneControlScreen(
                 }
             }
 
+            if (isMicLockedOn) {
+                LinearProgressIndicator(
+                    progress = { micRmsLevel.coerceIn(0.08f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth(0.75f)
+                        .height(5.dp),
+                    color = if (voiceState == VoiceState.HEARING) NeonEmerald else Cyan,
+                    trackColor = Color(0xFF1E293B)
+                )
+            }
+
             Text(
-                if (isMicLockedOn)
-                    "Continuous Phone Mic Active — Say \"Torch jalao\", \"Volume up\", \"WhatsApp kholo\", \"Screen poro\" (Tap red button to stop)"
-                else
-                    "Tap to start Phone Control Mic (Stays locked on for continuous commands)",
+                if (isMicLockedOn) micStatusHint
+                else "Tap to start Phone Control Mic (Continuous voice commands + spoken replies)",
                 color = if (isMicLockedOn) Color(0xFFFCD34D) else Silver,
                 fontSize = 11.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { launchSystemVoicePopup() },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text("🎤 Google Voice Popup", fontSize = 11.sp, color = Cyan)
+                }
+                if (voiceState == VoiceState.SPEAKING) {
+                    OutlinedButton(
+                        onClick = { voiceController.stopSpeaking() },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text("🔇 Stop Voice", fontSize = 11.sp, color = CrimsonRed)
+                    }
+                }
+            }
+
+            if (!micLastError.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF450A0A), RoundedCornerShape(8.dp))
+                        .border(1.dp, CrimsonRed.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text("⚠️ $micLastError", color = Color(0xFFFCA5A5), fontSize = 11.sp)
+                }
+            }
 
             if (liveVoiceText.isNotBlank()) {
                 Box(
@@ -290,6 +420,10 @@ fun PhoneControlScreen(
 
         // Offline Voice Packs (ZEE Male & ZHEE Female) Card
         var voicePackInfo by remember { mutableStateOf(voiceController.getVoicePackInfo()) }
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(900L)
+            voicePackInfo = voiceController.getVoicePackInfo()
+        }
         var voiceStatusMsg by remember { mutableStateOf("") }
         Column(
             modifier = Modifier
@@ -465,6 +599,10 @@ fun PhoneControlScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = {
+                                if (!hasMic && !voiceController.hasMicPermission()) {
+                                    onRequestMic()
+                                    return@Button
+                                }
                                 com.zeeai.companion.voice.WakeWordForegroundService.start(context)
                                 runCatching {
                                     val powerIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
