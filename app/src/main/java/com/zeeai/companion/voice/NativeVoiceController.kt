@@ -590,6 +590,37 @@ class NativeVoiceController(
         }
     }
 
+    /**
+     * Temporarily releases only the Activity SpeechRecognizer when ZEE AI goes into the background
+     * so WakeWordForegroundService can keep continuous hands-free mic control alive across external apps.
+     */
+    fun suspendRecognizerForBackgroundHandoff() {
+        _isMicLockedOn.value = false
+        isProcessingCommand = false
+        _micRmsLevel.value = 0f
+        mainHandler.removeCallbacks(restartListeningRunnable)
+        mainHandler.removeCallbacks(readyWatchdogRunnable)
+        mainHandler.post {
+            destroyRecognizerInternal()
+        }
+    }
+
+    fun resumeAfterForegroundReturn() {
+        if (activeOnFinal != null && activeOnPartial != null && hasMicPermission()) {
+            _isMicLockedOn.value = true
+            _voiceState.value = VoiceState.LISTENING
+            _lastError.value = null
+            _statusHint.value = "শুনছি... কথা বলুন বস"
+            WakeWordForegroundService.pause(context)
+            mainHandler.removeCallbacks(restartListeningRunnable)
+            mainHandler.postDelayed({
+                if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
+                    startListeningInternal()
+                }
+            }, 350L)
+        }
+    }
+
     fun testVoiceSample(
         isFemale: Boolean,
         online: Boolean = isOnline,
