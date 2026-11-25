@@ -1351,4 +1351,150 @@ class GeminiNativeClient {
         }
         Result.success(fileUri)
     }
+
+    /**
+     * Transcribes direct hardware AudioRecord WAV bytes cleanly via live Gemini Flash multimodal audio,
+     * preserving Bengali, Banglish, and English accurately without any Google Speech Activity popup.
+     */
+    suspend fun transcribeAudioWav(
+        apiKey: String,
+        wavBytes: ByteArray
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val cleanKey = apiKey.trim()
+        if (cleanKey.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("API key is blank"))
+        }
+        val b64 = Base64.encodeToString(wavBytes, Base64.NO_WRAP)
+        val prompt = """
+            Listen carefully to the user voice audio (could be Bengali, Banglish, or English).
+            Output ONLY the exact spoken words cleanly in natural Bengali/English/Banglish script with no extra commentary.
+            If there is only background noise or silence, output [SILENCE].
+        """.trimIndent()
+
+        val bodyJson = JSONObject().apply {
+            put(
+                "contents",
+                JSONArray().put(
+                    JSONObject()
+                        .put("role", "user")
+                        .put(
+                            "parts",
+                            JSONArray()
+                                .put(
+                                    JSONObject().put(
+                                        "inlineData",
+                                        JSONObject()
+                                            .put("mimeType", "audio/wav")
+                                            .put("data", b64)
+                                    )
+                                )
+                                .put(JSONObject().put("text", prompt))
+                        )
+                )
+            )
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.0)
+                put("maxOutputTokens", 180)
+            })
+        }
+
+        val modelsToTry = buildCandidateModels(cleanKey, cachedBestFlash, preferPro = false)
+        for (candidate in modelsToTry) {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$candidate:generateContent?key=$cleanKey"
+            val req = Request.Builder()
+                .url(url)
+                .header("x-goog-api-key", cleanKey)
+                .header("Content-Type", "application/json")
+                .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            try {
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val txt = JSONObject(resp.body?.string().orEmpty())
+                            .optJSONArray("candidates")
+                            ?.optJSONObject(0)
+                            ?.optJSONObject("content")
+                            ?.optJSONArray("parts")
+                            ?.optJSONObject(0)
+                            ?.optString("text", "")
+                            .orEmpty()
+                            .trim()
+                        if (txt.isNotBlank()) return@withContext Result.success(txt)
+                    } else if (resp.code == 404 || resp.code == 429 || resp.code == 400) {
+                        markModelCooldown(candidate)
+                    }
+                }
+            } catch (_: Exception) {
+                // cascade to next model
+            }
+        }
+        Result.failure(IllegalStateException("Audio transcription failed"))
+    }
+
+    /**
+     * Generates a strict JSON object response for autonomous multi-step screen agent decisions.
+     */
+    suspend fun generateJson(
+        apiKey: String,
+        systemInstruction: String,
+        userPrompt: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val cleanKey = apiKey.trim()
+        if (cleanKey.isBlank()) return@withContext Result.failure(IllegalArgumentException("API key is blank"))
+
+        val bodyJson = JSONObject().apply {
+            if (systemInstruction.isNotBlank()) {
+                put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstruction))))
+            }
+            put(
+                "contents",
+                JSONArray().put(
+                    JSONObject()
+                        .put("role", "user")
+                        .put("parts", JSONArray().put(JSONObject().put("text", userPrompt)))
+                )
+            )
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.15)
+                put("responseMimeType", "application/json")
+                put("maxOutputTokens", 450)
+            })
+        }
+
+        val modelsToTry = buildCandidateModels(cleanKey, cachedBestFlash, preferPro = false)
+        var lastErr = "JSON request failed"
+        for (candidate in modelsToTry) {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$candidate:generateContent?key=$cleanKey"
+            val req = Request.Builder()
+                .url(url)
+                .header("x-goog-api-key", cleanKey)
+                .header("Content-Type", "application/json")
+                .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            try {
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val txt = JSONObject(resp.body?.string().orEmpty())
+                            .optJSONArray("candidates")
+                            ?.optJSONObject(0)
+                            ?.optJSONObject("content")
+                            ?.optJSONArray("parts")
+                            ?.optJSONObject(0)
+                            ?.optString("text", "")
+                            .orEmpty()
+                            .trim()
+                        if (txt.isNotBlank()) return@withContext Result.success(txt)
+                    } else {
+                        if (resp.code == 404 || resp.code == 429 || resp.code == 400) {
+                            markModelCooldown(candidate)
+                        }
+                        lastErr = "HTTP ${resp.code}"
+                    }
+                }
+            } catch (e: Exception) {
+                lastErr = e.message ?: "Network error"
+            }
+        }
+        Result.failure(IllegalStateException(lastErr))
+    }
 }
