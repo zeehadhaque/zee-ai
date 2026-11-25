@@ -31,7 +31,6 @@ import com.zeeai.companion.ai.GeminiNativeClient
 import com.zeeai.companion.data.local.MemoryEntity
 import com.zeeai.companion.data.local.SecureKeyVault
 import com.zeeai.companion.data.local.ZeeDatabase
-import com.zeeai.companion.offline.LocalLlmInferenceEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -126,7 +125,6 @@ fun FilmmakerStudioScreen(
     database: ZeeDatabase,
     keyVault: SecureKeyVault,
     geminiClient: GeminiNativeClient,
-    localLlm: LocalLlmInferenceEngine,
     isOnline: () -> Boolean
 ) {
     val context = LocalContext.current
@@ -489,36 +487,8 @@ fun FilmmakerStudioScreen(
                 }
                 busy = false
             } else {
-                val installedId = localLlm.findFirstInstalledMediaPipeModelId()
-                if (installedId != null) {
-                    val acc = StringBuilder()
-                    statusText = "Running offline on local model ($installedId)..."
-                    localLlm.streamResponse(
-                        modelId = installedId,
-                        systemInstruction = sysInstruction,
-                        userPrompt = prompt,
-                        onToken = { token, done ->
-                            acc.append(token)
-                            scope.launch(Dispatchers.Main) {
-                                output = acc.toString()
-                                if (done) {
-                                    statusText = "Generated 100% offline via Local LLM."
-                                    busy = false
-                                }
-                            }
-                        },
-                        onError = { err ->
-                            scope.launch(Dispatchers.Main) {
-                                statusText = "Offline LLM error: $err"
-                                busy = false
-                            }
-                        }
-                    )
-                } else {
-                    statusText =
-                        "Offline mode. Connect to internet or download an offline model in Models tab."
-                    busy = false
-                }
+                statusText = "Internet connection and Google AI Studio API Key required for Cinema Studio."
+                busy = false
             }
         }
     }
@@ -910,7 +880,6 @@ fun FilmmakerStudioScreen(
                     OutlinedButton(
                         onClick = {
                             geminiClient.cancelActive()
-                            localLlm.cancelActiveGeneration()
                             busy = false
                             statusText = "Directing cancelled."
                         }
