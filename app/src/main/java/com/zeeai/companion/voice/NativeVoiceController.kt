@@ -13,6 +13,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.zeeai.companion.ai.GeminiNativeClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,11 +35,12 @@ enum class VoiceState {
 
 class NativeVoiceController(
     private val context: Context,
+    private val geminiClient: GeminiNativeClient = GeminiNativeClient(),
     private val onSpeakingStateChanged: (Boolean) -> Unit
 ) {
     companion object {
         private const val TAG = "ZeeNativeVoice"
-        private const val WATCHDOG_TIMEOUT_MS = 2600L
+        private const val WATCHDOG_TIMEOUT_MS = 2800L
         private val PREFERRED_RECOGNITION_PACKAGES = listOf(
             "com.google.android.googlequicksearchbox",
             "com.google.android.as",
@@ -48,6 +50,7 @@ class NativeVoiceController(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
+    private val directMicEngine = JarvisAudioMicEngine(geminiClient)
 
     private val _isMicLockedOn = MutableStateFlow(false)
     val isMicLockedOn: StateFlow<Boolean> = _isMicLockedOn.asStateFlow()
@@ -58,11 +61,14 @@ class NativeVoiceController(
     private val _micRmsLevel = MutableStateFlow(0f)
     val micRmsLevel: StateFlow<Float> = _micRmsLevel.asStateFlow()
 
-    private val _statusHint = MutableStateFlow("Tap Mic to start voice phone control")
+    private val _statusHint = MutableStateFlow("Tap Mic to start JARVIS voice control")
     val statusHint: StateFlow<String> = _statusHint.asStateFlow()
 
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
+
+    private val _usingDirectJarvisMic = MutableStateFlow(false)
+    val usingDirectJarvisMic: StateFlow<Boolean> = _usingDirectJarvisMic.asStateFlow()
 
     @Volatile
     private var isTtsSpeaking = false
@@ -72,51 +78,38 @@ class NativeVoiceController(
     private var preferSystemFallbackService = false
     @Volatile
     private var forceEnglishLocaleFallback = false
+    @Volatile
+    var preferPureJarvisAudioMic: Boolean = true
     private var consecutiveFailureCount = 0
-    private var watchdogStallCount = 0
 
     private var activeLanguageTag: String = "bn-BD"
-    private var activePreferOffline: Boolean = false
     private var activeOnPartial: ((String) -> Unit)? = null
     private var activeOnFinal: ((String) -> Unit)? = null
     private var activeOnError: ((String) -> Unit)? = null
 
     var onBeforeManualMicStart: (() -> Unit)? = null
-    var onFallbackToSystemDialog: (() -> Unit)? = null
 
     fun clearError() {
         _lastError.value = null
     }
 
     private val restartListeningRunnable = Runnable {
-        if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
+        if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand && !directMicEngine.isRunning()) {
             startListeningInternal()
         }
     }
 
     private val readyWatchdogRunnable = Runnable {
-        if (!_isMicLockedOn.value || isTtsSpeaking || isProcessingCommand) return@Runnable
-        watchdogStallCount++
-        Log.w(TAG, "SpeechRecognizer watchdog fired (#$watchdogStallCount): onReadyForSpeech stalled")
-
+        if (!_isMicLockedOn.value || isTtsSpeaking || isProcessingCommand || directMicEngine.isRunning()) return@Runnable
+        Log.w(TAG, "In-process SpeechRecognizer watchdog fired — seamlessly switching to Pure JARVIS Direct Audio Mic")
         destroyRecognizerInternal()
-
-        if (!preferSystemFallbackService && watchdogStallCount == 1) {
+        if (geminiApiKey.isNotBlank()) {
+            startDirectJarvisAudioLoop()
+        } else if (!preferSystemFallbackService) {
             preferSystemFallbackService = true
             _lastError.value = null
-            _statusHint.value = "Switching speech engine..."
+            _statusHint.value = "Switching in-app speech engine..."
             startListeningInternal()
-        } else if (onFallbackToSystemDialog != null) {
-            _lastError.value = null
-            _statusHint.value = "Google Voice ডায়ালগ ওপেন হচ্ছে..."
-            _isMicLockedOn.value = false
-            _voiceState.value = VoiceState.IDLE
-            _micRmsLevel.value = 0f
-            onFallbackToSystemDialog?.invoke()
-        } else {
-            _lastError.value = null
-            _statusHint.value = "মাইক রিকানেক্ট হচ্ছে..."
-            mainHandler.postDelayed(restartListeningRunnable, 500L)
         }
     }
 
@@ -139,9 +132,10 @@ class NativeVoiceController(
         onSpeechStart = {
             isTtsSpeaking = true
             isProcessingCommand = false
+            directMicEngine.setPaused(true)
             _voiceState.value = VoiceState.SPEAKING
             _micRmsLevel.value = 0f
-            _statusHint.value = "ZEE কথা বলছে..."
+            _statusHint.value = "জী উত্তর বলছে..."
             onSpeakingStateChanged(true)
             mainHandler.post {
                 mainHandler.removeCallbacks(restartListeningRunnable)
@@ -154,12 +148,16 @@ class NativeVoiceController(
             onSpeakingStateChanged(false)
             if (_isMicLockedOn.value && !isProcessingCommand) {
                 _voiceState.value = VoiceState.LISTENING
-                _statusHint.value = "শুনছি... কথা বলুন বস"
-                mainHandler.removeCallbacks(restartListeningRunnable)
-                mainHandler.postDelayed(restartListeningRunnable, 300L)
+                _statusHint.value = if (_usingDirectJarvisMic.value) "JARVIS Direct Mic শুনছে... বলুন বস" else "শুনছি... কথা বলুন বস"
+                if (directMicEngine.isRunning()) {
+                    directMicEngine.setPaused(false)
+                } else {
+                    mainHandler.removeCallbacks(restartListeningRunnable)
+                    mainHandler.postDelayed(restartListeningRunnable, 300L)
+                }
             } else {
                 _voiceState.value = VoiceState.IDLE
-                _statusHint.value = "Tap Mic to start voice phone control"
+                _statusHint.value = "Tap Mic to start JARVIS voice control"
             }
         },
         onVoiceError = { msg ->
@@ -182,9 +180,10 @@ class NativeVoiceController(
         if (text.isBlank()) return
         isTtsSpeaking = true
         isProcessingCommand = false
+        directMicEngine.setPaused(true)
         _voiceState.value = VoiceState.SPEAKING
         _micRmsLevel.value = 0f
-        _statusHint.value = "ZEE উত্তর বলছে..."
+        _statusHint.value = "জী উত্তর বলছে..."
         mainHandler.removeCallbacks(restartListeningRunnable)
         mainHandler.removeCallbacks(readyWatchdogRunnable)
         mainHandler.post { destroyRecognizerInternal() }
@@ -204,6 +203,7 @@ class NativeVoiceController(
         isTtsSpeaking = false
         onSpeakingStateChanged(false)
         if (_isMicLockedOn.value) {
+            directMicEngine.setPaused(false)
             _voiceState.value = VoiceState.LISTENING
         } else {
             _voiceState.value = VoiceState.IDLE
@@ -212,6 +212,7 @@ class NativeVoiceController(
 
     fun pauseListeningForProcessing() {
         isProcessingCommand = true
+        directMicEngine.setPaused(true)
         mainHandler.removeCallbacks(restartListeningRunnable)
         mainHandler.removeCallbacks(readyWatchdogRunnable)
         mainHandler.post { destroyRecognizerInternal() }
@@ -220,8 +221,12 @@ class NativeVoiceController(
     fun resumeListeningAfterProcessing() {
         isProcessingCommand = false
         if (_isMicLockedOn.value && !isTtsSpeaking) {
-            mainHandler.removeCallbacks(restartListeningRunnable)
-            mainHandler.postDelayed(restartListeningRunnable, 300L)
+            if (directMicEngine.isRunning()) {
+                directMicEngine.setPaused(false)
+            } else {
+                mainHandler.removeCallbacks(restartListeningRunnable)
+                mainHandler.postDelayed(restartListeningRunnable, 300L)
+            }
         }
     }
 
@@ -253,29 +258,73 @@ class NativeVoiceController(
 
         isProcessingCommand = false
         consecutiveFailureCount = 0
-        watchdogStallCount = 0
         preferSystemFallbackService = false
         forceEnglishLocaleFallback = false
 
         _isMicLockedOn.value = true
         _voiceState.value = VoiceState.LISTENING
         _lastError.value = null
-        _statusHint.value = "মাইক্রোফোন চালু হচ্ছে..."
+        _statusHint.value = "JARVIS মাইক চালু হচ্ছে..."
 
         activeLanguageTag = languageTag
-        activePreferOffline = false
         activeOnPartial = onPartial
         activeOnFinal = onFinal
         activeOnError = onError
 
         WakeWordForegroundService.pause(context)
 
+        // When online + Gemini API key present + Pure JARVIS mode active: use direct AudioRecord VAD (Zero Google Popup, Zero Chime)
+        if (preferPureJarvisAudioMic && isOnline && geminiApiKey.isNotBlank()) {
+            startDirectJarvisAudioLoop()
+            return
+        }
+
         mainHandler.removeCallbacks(restartListeningRunnable)
         mainHandler.postDelayed({
             if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
                 startListeningInternal()
             }
-        }, 250L)
+        }, 200L)
+    }
+
+    private fun startDirectJarvisAudioLoop() {
+        destroyRecognizerInternal()
+        _usingDirectJarvisMic.value = true
+        _lastError.value = null
+        _voiceState.value = VoiceState.LISTENING
+
+        directMicEngine.startContinuousCapture(
+            apiKeyProvider = { geminiApiKey },
+            onRmsLevel = { lvl -> _micRmsLevel.value = lvl },
+            onStatus = { hint ->
+                if (_isMicLockedOn.value && !isTtsSpeaking) {
+                    _statusHint.value = hint
+                }
+            },
+            onHearingStart = {
+                if (_isMicLockedOn.value && !isTtsSpeaking) {
+                    _voiceState.value = VoiceState.HEARING
+                }
+            },
+            onTranscript = { text ->
+                if (_isMicLockedOn.value && text.isNotBlank()) {
+                    _lastError.value = null
+                    _statusHint.value = "শোনা হয়েছে: $text"
+                    activeOnFinal?.invoke(text)
+                }
+            },
+            onError = { err ->
+                Log.w(TAG, "Direct Audio Mic fallback notice: $err")
+                _usingDirectJarvisMic.value = false
+                if (_isMicLockedOn.value && SpeechRecognizer.isRecognitionAvailable(context)) {
+                    startListeningInternal()
+                } else {
+                    _lastError.value = err
+                    _voiceState.value = VoiceState.ERROR
+                    activeOnError?.invoke(err)
+                }
+            }
+        )
     }
 
     private fun hasExplicitGoogleService(): Boolean {
@@ -288,7 +337,6 @@ class NativeVoiceController(
     }
 
     private fun createBestRecognizer(): SpeechRecognizer? {
-        // Always prioritize official Google RecognitionService first unless retrying OEM default
         if (!preferSystemFallbackService) {
             val services = runCatching {
                 context.packageManager.queryIntentServices(Intent("android.speech.RecognitionService"), 0)
@@ -305,29 +353,15 @@ class NativeVoiceController(
         }
 
         if (SpeechRecognizer.isRecognitionAvailable(context)) {
-            val sysRec = runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
+            return runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
                 ?: runCatching { SpeechRecognizer.createSpeechRecognizer(context.applicationContext) }.getOrNull()
-            if (sysRec != null) return sysRec
-        }
-
-        // Last-resort attempt on explicit Google service even if preferSystemFallbackService was toggled
-        if (preferSystemFallbackService && hasExplicitGoogleService()) {
-            val services = runCatching {
-                context.packageManager.queryIntentServices(Intent("android.speech.RecognitionService"), 0)
-            }.getOrDefault(emptyList())
-            val googleService = PREFERRED_RECOGNITION_PACKAGES.firstNotNullOfOrNull { pkg ->
-                services.firstOrNull { it.serviceInfo?.packageName == pkg }
-            }
-            if (googleService != null) {
-                val comp = ComponentName(googleService.serviceInfo.packageName, googleService.serviceInfo.name)
-                return runCatching { SpeechRecognizer.createSpeechRecognizer(context, comp) }.getOrNull()
-            }
         }
         return null
     }
 
     private fun startListeningInternal() {
         if (!_isMicLockedOn.value || isTtsSpeaking || isProcessingCommand) return
+        _usingDirectJarvisMic.value = false
 
         mainHandler.post {
             if (!_isMicLockedOn.value || isTtsSpeaking || isProcessingCommand) return@post
@@ -335,14 +369,16 @@ class NativeVoiceController(
 
             val sr = createBestRecognizer()
             if (sr == null) {
-                _isMicLockedOn.value = false
-                _voiceState.value = VoiceState.ERROR
-                val msg = "Android Speech Recognition পাওয়া যায়নি (Google Popup ব্যবহার করুন)।"
-                _lastError.value = msg
-                _statusHint.value = msg
-                WakeWordForegroundService.resume(context)
-                activeOnError?.invoke(msg)
-                onFallbackToSystemDialog?.invoke()
+                if (geminiApiKey.isNotBlank()) {
+                    startDirectJarvisAudioLoop()
+                } else {
+                    _isMicLockedOn.value = false
+                    _voiceState.value = VoiceState.ERROR
+                    val msg = "Settings থেকে Google AI Studio API Key দিন — JARVIS অডিও মাইক চালু হবে।"
+                    _lastError.value = msg
+                    _statusHint.value = msg
+                    activeOnError?.invoke(msg)
+                }
                 return@post
             }
 
@@ -350,11 +386,10 @@ class NativeVoiceController(
                 override fun onReadyForSpeech(params: Bundle?) {
                     mainHandler.removeCallbacks(readyWatchdogRunnable)
                     consecutiveFailureCount = 0
-                    watchdogStallCount = 0
                     if (_isMicLockedOn.value && !isTtsSpeaking) {
                         _voiceState.value = VoiceState.LISTENING
                         _lastError.value = null
-                        _statusHint.value = if (forceEnglishLocaleFallback) "শুনছি (English Mode)... বলুন বস" else "শুনছি... কথা বলুন বস"
+                        _statusHint.value = if (forceEnglishLocaleFallback) "শুনছি (English)... বলুন বস" else "শুনছি... কথা বলুন বস"
                     }
                 }
 
@@ -384,7 +419,6 @@ class NativeVoiceController(
 
                     if (!_isMicLockedOn.value) {
                         _voiceState.value = VoiceState.IDLE
-                        WakeWordForegroundService.resume(context)
                         return
                     }
 
@@ -394,7 +428,6 @@ class NativeVoiceController(
                         val msg = "Microphone permission প্রয়োজন।"
                         _lastError.value = msg
                         _statusHint.value = msg
-                        WakeWordForegroundService.resume(context)
                         activeOnError?.invoke(msg)
                         return
                     }
@@ -402,12 +435,10 @@ class NativeVoiceController(
                     if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                         consecutiveFailureCount = 0
                         mainHandler.post {
-                            destroyRecognizerInternal()
                             if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
                                 _voiceState.value = VoiceState.LISTENING
-                                _statusHint.value = "শুনছি... কমান্ড বলুন বস"
                                 mainHandler.removeCallbacks(restartListeningRunnable)
-                                mainHandler.postDelayed(restartListeningRunnable, 350L)
+                                mainHandler.postDelayed(restartListeningRunnable, 280L)
                             }
                         }
                         return
@@ -419,61 +450,35 @@ class NativeVoiceController(
                     ) {
                         forceEnglishLocaleFallback = true
                         _lastError.value = null
-                        _statusHint.value = "English voice mode active — বলুন বস"
                         mainHandler.post {
                             destroyRecognizerInternal()
                             if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
                                 mainHandler.removeCallbacks(restartListeningRunnable)
-                                mainHandler.postDelayed(restartListeningRunnable, 280L)
+                                mainHandler.postDelayed(restartListeningRunnable, 260L)
                             }
                         }
                         return
                     }
 
                     consecutiveFailureCount++
-                    val errText = mapErrorMessage(error)
-                    Log.w(TAG, "SpeechRecognizer error=$error ($errText), consecutive=$consecutiveFailureCount")
-
-                    if (consecutiveFailureCount == 1) {
-                        // Quietly switch recognizer service & language on first hiccup — never flash an error box
-                        preferSystemFallbackService = !preferSystemFallbackService
-                        if (error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT) {
-                            forceEnglishLocaleFallback = true
-                        }
-                        _lastError.value = null
-                        _statusHint.value = "মাইক রিকানেক্ট হচ্ছে..."
-                    } else {
-                        // Persistent SpeechRecognizer failure: auto-open official Google Voice Popup instead of leaving an error
+                    if (consecutiveFailureCount >= 2 && geminiApiKey.isNotBlank()) {
+                        // Switch silently to Pure JARVIS Direct Audio Mic instead of EVER opening Google Popup Activity!
                         mainHandler.post {
                             destroyRecognizerInternal()
-                            _isMicLockedOn.value = false
-                            _voiceState.value = VoiceState.IDLE
-                            WakeWordForegroundService.resume(context)
-                            if (onFallbackToSystemDialog != null) {
-                                _lastError.value = null
-                                _statusHint.value = "Google Voice ডায়ালগ ওপেন হচ্ছে..."
-                                onFallbackToSystemDialog?.invoke()
-                            } else {
-                                _voiceState.value = VoiceState.ERROR
-                                _lastError.value = errText
-                                _statusHint.value = errText
-                                activeOnError?.invoke(errText)
-                            }
+                            startDirectJarvisAudioLoop()
                         }
                         return
                     }
 
-                    val retryDelay = when (error) {
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 600L
-                        else -> 400L
-                    }
-
+                    preferSystemFallbackService = !preferSystemFallbackService
+                    _lastError.value = null
+                    _statusHint.value = "মাইক রিকানেক্ট হচ্ছে..."
                     mainHandler.post {
                         destroyRecognizerInternal()
                         if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
                             _voiceState.value = VoiceState.LISTENING
                             mainHandler.removeCallbacks(restartListeningRunnable)
-                            mainHandler.postDelayed(restartListeningRunnable, retryDelay)
+                            mainHandler.postDelayed(restartListeningRunnable, 420L)
                         }
                     }
                 }
@@ -496,7 +501,7 @@ class NativeVoiceController(
 
                     if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
                         mainHandler.removeCallbacks(restartListeningRunnable)
-                        mainHandler.postDelayed(restartListeningRunnable, 450L)
+                        mainHandler.postDelayed(restartListeningRunnable, 350L)
                     }
                 }
 
@@ -531,37 +536,12 @@ class NativeVoiceController(
             }.onFailure { err ->
                 mainHandler.removeCallbacks(readyWatchdogRunnable)
                 Log.w(TAG, "sr.startListening threw: ${err.message}")
-                if (!preferSystemFallbackService) {
-                    preferSystemFallbackService = true
-                    _lastError.value = null
-                    _statusHint.value = "মাইক রিকানেক্ট হচ্ছে..."
-                    mainHandler.postDelayed(restartListeningRunnable, 350L)
-                } else if (onFallbackToSystemDialog != null) {
-                    _lastError.value = null
-                    _isMicLockedOn.value = false
-                    _voiceState.value = VoiceState.IDLE
-                    onFallbackToSystemDialog?.invoke()
+                if (geminiApiKey.isNotBlank()) {
+                    startDirectJarvisAudioLoop()
                 } else {
                     _lastError.value = "মাইক চালু সমস্যা: ${err.localizedMessage ?: "Retry"}"
                 }
             }
-        }
-    }
-
-    private fun mapErrorMessage(code: Int): String = when (code) {
-        SpeechRecognizer.ERROR_AUDIO -> "অডিও রেকর্ড সমস্যা — রিসেট হচ্ছে"
-        SpeechRecognizer.ERROR_CLIENT -> "স্পিচ ক্লায়েন্ট এরর — রিকানেক্ট হচ্ছে"
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission বন্ধ"
-        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "ইন্টারনেট নেই — English mode ট্রাই হচ্ছে"
-        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "মাইক রিসেট হচ্ছে..."
-        SpeechRecognizer.ERROR_SERVER, 11 -> "Google Speech সার্ভার সংযোগ বিচ্ছিন্ন"
-        else -> "ভয়েস এরর ($code) — Popup Mic ব্যবহার করতে পারেন"
-    }
-
-    fun requestRestartListening(delayMs: Long = 200L) {
-        if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
-            mainHandler.removeCallbacks(restartListeningRunnable)
-            mainHandler.postDelayed(restartListeningRunnable, delayMs)
         }
     }
 
@@ -576,11 +556,13 @@ class NativeVoiceController(
 
     fun stopListening(resumeWakeWord: Boolean = true) {
         _isMicLockedOn.value = false
+        _usingDirectJarvisMic.value = false
         isProcessingCommand = false
+        directMicEngine.stopCapture()
         _micRmsLevel.value = 0f
         if (!isTtsSpeaking) {
             _voiceState.value = VoiceState.IDLE
-            _statusHint.value = "Tap Mic to start voice phone control"
+            _statusHint.value = "Tap Mic to start JARVIS voice control"
         }
         mainHandler.removeCallbacks(restartListeningRunnable)
         mainHandler.removeCallbacks(readyWatchdogRunnable)
@@ -590,13 +572,11 @@ class NativeVoiceController(
         }
     }
 
-    /**
-     * Temporarily releases only the Activity SpeechRecognizer when ZEE AI goes into the background
-     * so WakeWordForegroundService can keep continuous hands-free mic control alive across external apps.
-     */
     fun suspendRecognizerForBackgroundHandoff() {
         _isMicLockedOn.value = false
+        _usingDirectJarvisMic.value = false
         isProcessingCommand = false
+        directMicEngine.stopCapture()
         _micRmsLevel.value = 0f
         mainHandler.removeCallbacks(restartListeningRunnable)
         mainHandler.removeCallbacks(readyWatchdogRunnable)
@@ -612,12 +592,16 @@ class NativeVoiceController(
             _lastError.value = null
             _statusHint.value = "শুনছি... কথা বলুন বস"
             WakeWordForegroundService.pause(context)
+            if (preferPureJarvisAudioMic && isOnline && geminiApiKey.isNotBlank()) {
+                startDirectJarvisAudioLoop()
+                return
+            }
             mainHandler.removeCallbacks(restartListeningRunnable)
             mainHandler.postDelayed({
                 if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
                     startListeningInternal()
                 }
-            }, 350L)
+            }, 300L)
         }
     }
 
@@ -628,9 +612,9 @@ class NativeVoiceController(
         elevenKey: String = elevenLabsApiKey
     ) {
         val testPhrase = if (isFemale) {
-            "হ্যালো বস! আমি ঝী। এখন আমার হান্ড্রেড পারসেন্ট ন্যাচারাল অনলাইন হিউম্যান ভয়েস সক্রিয় আছে। বলুন কী সাহায্য করতে পারি?"
+            "হ্যালো বস! আমি ঝী। এখন আমাদের নিজস্ব জার্ভিস হিউম্যান ভয়েস সক্রিয় আছে। বলুন কী সাহায্য করতে পারি?"
         } else {
-            "ইয়েস বস! আমি জী। এখন আমার হান্ড্রেড পারসেন্ট ন্যাচারাল অনলাইন হিউম্যান ভয়েস সক্রিয় আছে। হুকুম করুন বস, কী করতে হবে?"
+            "ইয়েস বস! আমি জী। এখন আমাদের নিজস্ব জার্ভিস স্টুডিও হিউম্যান ভয়েস সক্রিয় আছে। হুকুম করুন বস, কী করতে হবে?"
         }
         speak(
             text = testPhrase,
