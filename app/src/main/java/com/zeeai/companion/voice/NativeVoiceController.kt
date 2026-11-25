@@ -50,7 +50,7 @@ class NativeVoiceController(
 ) {
     companion object {
         private const val TAG = "ZeeNativeVoice"
-        private const val WATCHDOG_TIMEOUT_MS = 4500L
+        private const val WATCHDOG_TIMEOUT_MS = 2600L
         private val PREFERRED_RECOGNITION_PACKAGES = listOf(
             "com.google.android.googlequicksearchbox",
             "com.google.android.as",
@@ -300,6 +300,10 @@ class NativeVoiceController(
                     ?: runCatching { SpeechRecognizer.createSpeechRecognizer(context.applicationContext, comp) }.getOrNull()
                 if (rec != null) return rec
             }
+        }
+
+        if (!SpeechRecognizer.isRecognitionAvailable(context) && !hasExplicitGoogleService()) {
+            return null
         }
 
         return runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
