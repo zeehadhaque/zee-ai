@@ -2,6 +2,7 @@ package com.zeeai.companion.voice
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Bundle
@@ -10,25 +11,29 @@ import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
-import java.io.FileInputStream
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 enum class VoicePersona { ZEE_MALE, ZHEE_FEMALE }
 
@@ -44,52 +49,62 @@ class HumanVoiceEngine(
         private const val ELEVEN_VOICE_FEMALE = "EXAVITQu4vr4xnSDxMaL" // Bella/Sarah (Warm Female)
     }
 
+    private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    private val offlineNeuralEngine = OfflineNeuralTtsEngine(context, onSpeechStart, onSpeechDone)
+    private val offlineNeuralEngine = OfflineNeuralTtsEngine(appContext)
 
+    @Volatile
     private var androidTts: TextToSpeech? = null
+    @Volatile
     private var isTtsReady = false
     private var currentJob: Job? = null
+    @Volatile
     private var activeMediaPlayer: MediaPlayer? = null
+
+    private val sessionCounter = AtomicLong(0L)
+    private val sessionSpeakingActive = AtomicBoolean(false)
+    private var activeUtteranceId: String? = null
+    private var activeUtteranceSignal: CompletableDeferred<Boolean>? = null
+    private var activeFocusRequest: AudioFocusRequest? = null
 
     init {
         initLocalTts()
     }
 
     private fun initLocalTts() {
-        var localInstance: TextToSpeech? = null
-        val listener = TextToSpeech.OnInitListener { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                isTtsReady = true
-                val instance = localInstance ?: androidTts
-                instance?.let { configureTtsAttributes(it) }
-            } else {
-                Log.w(TAG, "Primary TTS failed init, retrying default system engine")
-                runCatching {
-                    androidTts = TextToSpeech(context.applicationContext) { fallbackStatus ->
-                        isTtsReady = (fallbackStatus == TextToSpeech.SUCCESS)
-                        if (isTtsReady) androidTts?.let { configureTtsAttributes(it) }
+        runCatching {
+            TextToSpeech(appContext, { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    isTtsReady = true
+                    androidTts?.let { configureUtteranceListener(it) }
+                } else {
+                    Log.w(TAG, "Google TTS engine init failed ($status), falling back to device default TTS")
+                    runCatching { androidTts?.shutdown() }
+                    val fallback = TextToSpeech(appContext) { fbStatus ->
+                        isTtsReady = (fbStatus == TextToSpeech.SUCCESS)
+                        if (isTtsReady) androidTts?.let { configureUtteranceListener(it) }
                     }
+                    androidTts = fallback
+                }
+            }, "com.google.android.tts").also { instance ->
+                androidTts = instance
+            }
+        }.onFailure {
+            runCatching {
+                androidTts = TextToSpeech(appContext) { status ->
+                    isTtsReady = (status == TextToSpeech.SUCCESS)
+                    if (isTtsReady) androidTts?.let { configureUtteranceListener(it) }
                 }
             }
         }
-
-        localInstance = runCatching {
-            TextToSpeech(context.applicationContext, listener, "com.google.android.tts")
-        }.getOrElse {
-            TextToSpeech(context.applicationContext, listener)
-        }
-        androidTts = localInstance
-        configureTtsAttributes(localInstance)
     }
 
-    private fun configureTtsAttributes(tts: TextToSpeech?) {
-        if (tts == null) return
+    private fun configureUtteranceListener(tts: TextToSpeech) {
         runCatching {
             tts.setAudioAttributes(
                 AudioAttributes.Builder()
@@ -99,25 +114,58 @@ class HumanVoiceEngine(
             )
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
-                    scope.launch(Dispatchers.Main) { onSpeechStart() }
+                    // Start already notified for session
                 }
+
                 override fun onDone(utteranceId: String?) {
-                    scope.launch(Dispatchers.Main) { onSpeechDone() }
+                    if (utteranceId == null || utteranceId == activeUtteranceId) {
+                        activeUtteranceSignal?.complete(true)
+                    }
                 }
+
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
-                    scope.launch(Dispatchers.Main) { onSpeechDone() }
+                    if (utteranceId == null || utteranceId == activeUtteranceId) {
+                        activeUtteranceSignal?.complete(false)
+                    }
+                }
+
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                    Log.w(TAG, "Android TTS onError utterance=$utteranceId code=$errorCode")
+                    if (utteranceId == null || utteranceId == activeUtteranceId) {
+                        activeUtteranceSignal?.complete(false)
+                    }
                 }
             })
         }
     }
 
+    fun getVoicePackInfo(): TtsVoicePackInfo {
+        val tts = androidTts
+        val allVoices = runCatching { tts?.voices }.getOrNull().orEmpty()
+        val installedLocal = allVoices.filter { v ->
+            !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) && !v.isNetworkConnectionRequired
+        }
+        val hasBn = installedLocal.any { it.locale.language.equals("bn", ignoreCase = true) } ||
+            OfflineVoiceCatalog.packs.any { it.language == VoiceLang.BENGALI && OfflineVoiceCatalog.isInstalled(appContext, it.id) }
+        val hasEn = installedLocal.any { it.locale.language.equals("en", ignoreCase = true) } ||
+            (runCatching { tts?.isLanguageAvailable(Locale.US) }.getOrDefault(-1) ?: -1) >= TextToSpeech.LANG_AVAILABLE
+        val engine = runCatching { tts?.defaultEngine }.getOrNull() ?: "Android TTS"
+        return TtsVoicePackInfo(
+            totalVoices = allVoices.size,
+            offlineVoices = installedLocal.size,
+            hasBengali = hasBn,
+            hasEnglish = hasEn,
+            defaultEngine = engine
+        )
+    }
+
     /**
      * Best available human voice দিয়ে কথা বলবে:
      * 1. Online + ElevenLabs Key থাকলে -> Cinema-Grade ElevenLabs Voice
-     * 2. Online থাকলে -> High-Definition Google Translate Neural Voice (Zero robotic tone, 100% natural Bangla & English)
+     * 2. Online থাকলে -> High-Definition Google Translate Neural Voice
      * 3. Offline Sherpa-ONNX Voice Pack ডাউনলোড করা থাকলে -> Sherpa-ONNX VITS
-     * 4. 100% Offline Fallback -> System HD Voice (Bangla supported হলে বাংলা, নতুবা ফোনেটিক বাংলিশে স্পষ্ট কথা বলবে)
+     * 4. Guaranteed Local HD Offline Voice (Bangla supported থাকলে বাংলা, নতুবা ফোনেটিক বাংলিশে স্পষ্ট কথা বলবে)
      */
     fun speakHuman(
         rawText: String,
@@ -129,53 +177,109 @@ class HumanVoiceEngine(
         val cleanText = cleanTextForNaturalSpeech(rawText)
         if (cleanText.isBlank()) return
 
-        stopSpeaking()
+        stopPlaybackInternals()
+        val mySessionId = sessionCounter.incrementAndGet()
+        sessionSpeakingActive.set(true)
 
         currentJob = scope.launch {
-            // Ensure media volume is audible
-            ensureAudibleVolume()
+            try {
+                withContext(Dispatchers.Main) {
+                    if (sessionCounter.get() == mySessionId) {
+                        onSpeechStart()
+                    }
+                }
 
-            // ১. ElevenLabs (যদি API Key থাকে)
-            if (isOnline && elevenLabsApiKey.isNotBlank()) {
-                val played = tryPlayElevenLabs(cleanText, persona, elevenLabsApiKey)
-                if (played) return@launch
+                ensureAudibleVolume()
+                requestSpeechAudioFocus()
+
+                var completed = false
+
+                // 1. ElevenLabs (if online & API Key present)
+                if (!completed && isOnline && elevenLabsApiKey.isNotBlank()) {
+                    completed = tryPlayElevenLabs(cleanText, persona, elevenLabsApiKey, mySessionId)
+                }
+
+                // 2. Google High-Definition Neural TTS (if online)
+                if (!completed && isOnline) {
+                    completed = tryPlayGoogleNeuralTts(cleanText, mySessionId)
+                }
+
+                // 3. 100% Offline Sherpa-ONNX Neural Voice (suspends until playback completes)
+                if (!completed && isActive && sessionCounter.get() == mySessionId) {
+                    val gender = if (persona == VoicePersona.ZEE_MALE) VoiceGender.MALE_ZEE else VoiceGender.FEMALE_ZHEE
+                    completed = offlineNeuralEngine.speakOfflineNeural(cleanText, gender, notifyLifecycle = false)
+                }
+
+                // 4. Guaranteed Local HD Offline Voice (awaits utterance completion + retry fallback)
+                if (!completed && isActive && sessionCounter.get() == mySessionId) {
+                    speakOfflineHdVoice(cleanText, persona, isOnline, mySessionId)
+                }
+            } catch (_: CancellationException) {
+                // Superseded by new speak() or stopped by user
+            } catch (t: Throwable) {
+                Log.e(TAG, "speakHuman failed: ${t.message}", t)
+            } finally {
+                withContext(NonCancellable) {
+                    abandonSpeechAudioFocus()
+                    if (sessionCounter.get() == mySessionId && sessionSpeakingActive.getAndSet(false)) {
+                        withContext(Dispatchers.Main) {
+                            onSpeechDone()
+                        }
+                    }
+                }
             }
-
-            // ২. Google High-Definition Neural TTS (Free, Ultra-fast, 100% Human-like)
-            if (isOnline) {
-                val played = tryPlayGoogleNeuralTts(cleanText)
-                if (played) return@launch
-            }
-
-            // ৩. 100% Offline Sherpa-ONNX Neural Voice (VITS/Piper model downloaded)
-            val gender = if (persona == VoicePersona.ZEE_MALE) VoiceGender.MALE_ZEE else VoiceGender.FEMALE_ZHEE
-            val neuralPlayed = offlineNeuralEngine.speakOfflineNeural(cleanText, gender)
-            if (neuralPlayed) return@launch
-
-            // ৪. Guaranteed Local HD Offline Voice
-            speakOfflineHdVoice(cleanText, persona)
         }
     }
 
     private fun ensureAudibleVolume() {
         runCatching {
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
             if (audioManager != null) {
                 val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
                 val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                if (currentVol == 0) {
+                if (currentVol <= 1 && maxVol > 2) {
                     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.70f).toInt().coerceAtLeast(1), 0)
                 }
             }
         }
     }
 
-    /**
-     * Google High-Definition Translate Neural Voice.
-     * বাংলা টেক্সটের জন্য 'bn', ইংরেজি টেক্সটের জন্য 'en' দিয়ে সরাসরি ক্রিস্টাল ক্লিয়ার হিউম্যান অডিও স্ট্রিম করে।
-     * বড় টেক্সট হলে বাক্য অনুযায়ী দ্রুত চাঙ্ক করে প্লে করে।
-     */
-    private suspend fun tryPlayGoogleNeuralTts(text: String): Boolean {
+    private fun requestSpeechAudioFocus() {
+        runCatching {
+            val am = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setAcceptsDelayedFocusGain(false)
+                .build()
+            activeFocusRequest = req
+            am.requestAudioFocus(req)
+        }
+    }
+
+    private fun abandonSpeechAudioFocus() {
+        runCatching {
+            val am = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            activeFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+            activeFocusRequest = null
+        }
+    }
+
+    private fun isValidAudioPayload(contentType: String?, bytes: ByteArray?): Boolean {
+        if (bytes == null || bytes.size < 256) return false
+        val ct = contentType.orEmpty().lowercase()
+        if (ct.contains("text/html") || ct.contains("application/json")) return false
+        // Reject HTML or JSON masquerading with wrong MIME
+        val head = bytes.take(16).toByteArray().decodeToString().trimStart()
+        if (head.startsWith("<") || head.startsWith("{")) return false
+        return true
+    }
+
+    private suspend fun tryPlayGoogleNeuralTts(text: String, mySessionId: Long): Boolean {
         return runCatching {
             val isBengali = text.any { it in '\u0980'..'\u09FF' }
             val langCode = if (isBengali) "bn" else "en"
@@ -185,7 +289,7 @@ class HumanVoiceEngine(
 
             var anyPlayed = false
             for (sentence in sentences) {
-                if (!scope.isActive) break
+                if (!scope.isActive || sessionCounter.get() != mySessionId) break
                 val encoded = URLEncoder.encode(sentence, "UTF-8")
                 val url = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=$langCode&q=$encoded"
 
@@ -195,16 +299,22 @@ class HumanVoiceEngine(
                     .build()
 
                 val bytes = httpClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) null else resp.body?.bytes()
-                }
+                    if (!resp.isSuccessful) null
+                    else {
+                        val ct = resp.header("Content-Type")
+                        val raw = resp.body?.bytes()
+                        if (isValidAudioPayload(ct, raw)) raw else null
+                    }
+                } ?: return false
 
-                if (bytes != null && bytes.size > 100) {
-                    val tempFile = File(context.cacheDir, "zee_neural_${System.currentTimeMillis()}.mp3")
-                    tempFile.writeBytes(bytes)
-                    val played = playMp3File(tempFile)
-                    tempFile.delete()
-                    if (played) anyPlayed = true
-                }
+                if (sessionCounter.get() != mySessionId) return false
+
+                val tempFile = File(appContext.cacheDir, "zee_neural_${System.currentTimeMillis()}.mp3")
+                tempFile.writeBytes(bytes)
+                val played = playMp3File(tempFile)
+                runCatching { tempFile.delete() }
+                if (!played) return anyPlayed
+                anyPlayed = true
             }
             anyPlayed
         }.getOrElse {
@@ -220,7 +330,6 @@ class HumanVoiceEngine(
             val chunk = raw.trim()
             if (chunk.isNotBlank()) {
                 if (chunk.length > 170) {
-                    // Split long sentence at commas or spaces
                     var remaining = chunk
                     while (remaining.length > 170) {
                         val splitIndex = remaining.substring(0, 170).lastIndexOfAny(charArrayOf(',', ';', ' ', '،'))
@@ -240,7 +349,8 @@ class HumanVoiceEngine(
     private suspend fun tryPlayElevenLabs(
         text: String,
         persona: VoicePersona,
-        apiKey: String
+        apiKey: String,
+        mySessionId: Long
     ): Boolean {
         return runCatching {
             val voiceId = if (persona == VoicePersona.ZEE_MALE) ELEVEN_VOICE_MALE else ELEVEN_VOICE_FEMALE
@@ -267,151 +377,212 @@ class HumanVoiceEngine(
                 .build()
 
             httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return false
-                val mp3Bytes = resp.body?.bytes() ?: return false
-                val tempFile = File(context.cacheDir, "zee_eleven_voice.mp3")
-                tempFile.writeBytes(mp3Bytes)
+                if (!resp.isSuccessful) {
+                    Log.w(TAG, "ElevenLabs HTTP ${resp.code}")
+                    return false
+                }
+                val mp3Bytes = resp.body?.bytes()
+                if (!isValidAudioPayload(resp.header("Content-Type"), mp3Bytes)) return false
+                if (sessionCounter.get() != mySessionId) return false
+                val tempFile = File(appContext.cacheDir, "zee_eleven_voice.mp3")
+                tempFile.writeBytes(mp3Bytes!!)
                 val played = playMp3File(tempFile)
-                tempFile.delete()
+                runCatching { tempFile.delete() }
                 played
             }
         }.getOrDefault(false)
     }
 
     private suspend fun playMp3File(file: File): Boolean {
-        val player = MediaPlayer()
-        activeMediaPlayer = player
-        val doneSignal = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        val doneSignal = CompletableDeferred<Boolean>()
+        var player: MediaPlayer? = null
 
         return withContext(Dispatchers.Main) {
             try {
-                runCatching {
-                    onSpeechStart()
-                    player.setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build()
-                    )
-                    player.setDataSource(file.absolutePath)
-                    player.setOnCompletionListener {
-                        if (!doneSignal.isCompleted) doneSignal.complete(true)
-                    }
-                    player.setOnErrorListener { _, what, extra ->
-                        Log.w(TAG, "MediaPlayer error: what=$what, extra=$extra")
-                        if (!doneSignal.isCompleted) doneSignal.complete(false)
-                        true
-                    }
-                    player.prepare()
-                    player.start()
-                }.onFailure {
-                    Log.w(TAG, "MediaPlayer start failed: ${it.message}")
-                    if (!doneSignal.isCompleted) doneSignal.complete(false)
+                player = MediaPlayer()
+                activeMediaPlayer = player
+                player?.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                player?.setOnCompletionListener {
+                    if (!doneSignal.isCompleted) doneSignal.complete(true)
                 }
+                player?.setOnErrorListener { _, what, extra ->
+                    Log.w(TAG, "MediaPlayer error: what=$what, extra=$extra")
+                    if (!doneSignal.isCompleted) doneSignal.complete(false)
+                    true
+                }
+                player?.setOnPreparedListener { mp ->
+                    runCatching { mp.start() }.onFailure {
+                        if (!doneSignal.isCompleted) doneSignal.complete(false)
+                    }
+                }
+                player?.setDataSource(file.absolutePath)
+                player?.prepareAsync()
 
-                doneSignal.await()
+                withTimeoutOrNull(35_000L) {
+                    doneSignal.await()
+                } ?: false
+            } catch (t: Throwable) {
+                Log.w(TAG, "MediaPlayer play failed: ${t.message}")
+                false
             } finally {
                 runCatching {
-                    if (player.isPlaying) player.stop()
-                    player.release()
+                    player?.let { mp ->
+                        if (mp.isPlaying) mp.stop()
+                        mp.release()
+                    }
                 }
                 if (activeMediaPlayer === player) activeMediaPlayer = null
-                onSpeechDone()
             }
         }
     }
 
     /**
      * Offline Local HD Voice Fallback:
-     * ডিভাইসে বাংলা ভয়েস থাকলে সরাসরি বাংলায় পড়ে।
-     * বাংলা না থাকলে (শুধুমাত্র English TTS থাকলে) বাংলা টেক্সটকে ফোনেটিক বাংলিশে রূপান্তর করে ইংরেজি ভয়েস দিয়ে স্পষ্ট আওয়াজে পড়ে।
-     * ফলে ফোন কখনো সাইলেন্ট থাকে না।
+     * ডিভাইসে অ্যাকচুয়াল ইনস্টল্ড বাংলা ভয়েস থাকলে বাংলায় পড়ে,
+     * নতুবা ফোনেটিক বাংলিশে রূপান্তর করে ইনস্টল্ড ইংরেজি ভয়েসে স্পষ্ট আওয়াজে পড়ে।
      */
-    private suspend fun speakOfflineHdVoice(text: String, persona: VoicePersona) = withContext(Dispatchers.Main) {
+    private suspend fun speakOfflineHdVoice(
+        text: String,
+        persona: VoicePersona,
+        isOnline: Boolean,
+        mySessionId: Long
+    ) = withContext(Dispatchers.Main) {
         var waitCount = 0
-        while (!isTtsReady && waitCount < 15) {
+        while (!isTtsReady && waitCount < 20) {
+            if (sessionCounter.get() != mySessionId) return@withContext
             delay(100)
             waitCount++
         }
 
         var tts = androidTts
         if (tts == null || !isTtsReady) {
-            val fallbackCompletable = kotlinx.coroutines.CompletableDeferred<Boolean>()
-            val fallbackTts = TextToSpeech(context.applicationContext) { status ->
-                fallbackCompletable.complete(status == TextToSpeech.SUCCESS)
+            val fallbackCompletable = CompletableDeferred<Boolean>()
+            val fallbackTts = TextToSpeech(appContext) { status ->
+                if (!fallbackCompletable.isCompleted) {
+                    fallbackCompletable.complete(status == TextToSpeech.SUCCESS)
+                }
             }
-            if (fallbackCompletable.await()) {
+            val ready = withTimeoutOrNull(2500L) { fallbackCompletable.await() } == true
+            if (ready) {
+                runCatching { androidTts?.shutdown() }
                 androidTts = fallbackTts
                 isTtsReady = true
                 tts = fallbackTts
-                configureTtsAttributes(fallbackTts)
             } else {
+                runCatching { fallbackTts.shutdown() }
                 Log.e(TAG, "No TTS engine could be initialized on device.")
-                onSpeechDone()
                 return@withContext
             }
         }
 
-        configureTtsAttributes(tts)
+        if (sessionCounter.get() != mySessionId) return@withContext
+        configureUtteranceListener(tts)
 
         val isBengali = text.any { it in '\u0980'..'\u09FF' }
+        val allVoices = runCatching { tts.voices }.getOrNull().orEmpty()
 
-        // Check if device TTS natively supports Bengali
-        val availableBnLocale = if (isBengali) {
+        // Verify whether device truly has a working installed Bengali voice (never pick KEY_FEATURE_NOT_INSTALLED!)
+        val installedBnVoiceExists = allVoices.any { v ->
+            v.locale.language.equals("bn", ignoreCase = true) &&
+                !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) &&
+                (isOnline || !v.isNetworkConnectionRequired)
+        }
+
+        val availableBnLocale = if (isBengali && (installedBnVoiceExists || allVoices.isEmpty())) {
             listOf(Locale("bn", "BD"), Locale("bn", "IN"), Locale("bn")).firstOrNull { loc ->
                 val res = runCatching { tts.isLanguageAvailable(loc) }.getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
                 res >= TextToSpeech.LANG_AVAILABLE
             }
         } else null
 
-        val textToSpeak: String
+        val primaryAttemptOk: Boolean
         if (isBengali && availableBnLocale != null) {
             tts.language = availableBnLocale
-            textToSpeak = text
-        } else if (isBengali) {
-            // Bengali data not installed in system TTS -> Transliterate to Phonetic Banglish
-            textToSpeak = BengaliToBanglish.toBanglish(text)
-            tts.language = Locale.US
+            pickBestInstalledVoice(tts, "bn", persona, isOnline)?.let { tts.voice = it }
+            primaryAttemptOk = speakAndAwaitTts(tts, text, persona, mySessionId)
         } else {
-            textToSpeak = text
-            tts.language = Locale.US
+            val spokenText = if (isBengali) BengaliToBanglish.toBanglish(text) else text
+            val enLocale = findBestEnglishOrDefaultLocale(tts)
+            tts.language = enLocale
+            pickBestInstalledVoice(tts, enLocale.language, persona, isOnline)?.let { tts.voice = it }
+            primaryAttemptOk = speakAndAwaitTts(tts, spokenText, persona, mySessionId)
         }
 
-        // Set natural voice attributes
-        val bestVoice = pickBestLocalVoice(tts, if (availableBnLocale != null) "bn" else "en", persona)
-        if (bestVoice != null) {
-            tts.voice = bestVoice
+        // Guaranteed emergency retry with Phonetic Banglish + device default locale & default engine voice
+        if (!primaryAttemptOk && sessionCounter.get() == mySessionId) {
+            Log.w(TAG, "Primary local TTS failed, retrying clean default locale + Banglish fallback")
+            val emergencyText = if (isBengali) BengaliToBanglish.toBanglish(text) else text
+            val safeLocale = findBestEnglishOrDefaultLocale(tts)
+            runCatching { tts.language = safeLocale }
+            speakAndAwaitTts(tts, emergencyText, persona, mySessionId)
         }
+    }
 
-        tts.setPitch(if (persona == VoicePersona.ZEE_MALE) 0.96f else 1.05f)
+    private fun findBestEnglishOrDefaultLocale(tts: TextToSpeech): Locale {
+        val candidates = listOf(Locale.US, Locale("en", "IN"), Locale.UK, Locale("en"), Locale.getDefault())
+        return candidates.firstOrNull { loc ->
+            runCatching { tts.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
+        } ?: Locale.getDefault()
+    }
+
+    private suspend fun speakAndAwaitTts(
+        tts: TextToSpeech,
+        textToSpeak: String,
+        persona: VoicePersona,
+        mySessionId: Long
+    ): Boolean {
+        if (textToSpeak.isBlank() || sessionCounter.get() != mySessionId) return false
+        tts.setPitch(if (persona == VoicePersona.ZEE_MALE) 0.94f else 1.06f)
         tts.setSpeechRate(if (persona == VoicePersona.ZEE_MALE) 0.98f else 0.96f)
 
         val utteranceId = UUID.randomUUID().toString()
+        val deferred = CompletableDeferred<Boolean>()
+        activeUtteranceId = utteranceId
+        activeUtteranceSignal = deferred
+
         val params = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
         }
-        val status = tts.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+        val status = runCatching {
+            tts.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+        }.getOrDefault(TextToSpeech.ERROR)
+
         if (status != TextToSpeech.SUCCESS) {
             Log.e(TAG, "tts.speak returned error: $status")
-            onSpeechDone()
+            activeUtteranceId = null
+            activeUtteranceSignal = null
+            return false
         }
+
+        val timeoutMs = (textToSpeak.length * 140L + 6000L).coerceIn(8_000L, 45_000L)
+        return withTimeoutOrNull(timeoutMs) {
+            deferred.await()
+        } ?: false
     }
 
-    private fun pickBestLocalVoice(
+    private fun pickBestInstalledVoice(
         tts: TextToSpeech,
         langPrefix: String,
-        persona: VoicePersona
+        persona: VoicePersona,
+        isOnline: Boolean
     ): Voice? {
         val allVoices = runCatching { tts.voices }.getOrNull().orEmpty()
-        val langVoices = allVoices.filter {
-            it.locale.language.equals(langPrefix, ignoreCase = true)
+        val installedVoices = allVoices.filter { v ->
+            v.locale.language.equals(langPrefix, ignoreCase = true) &&
+                !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) &&
+                (isOnline || !v.isNetworkConnectionRequired)
         }.sortedWith(
             compareByDescending<Voice> { !it.isNetworkConnectionRequired }
                 .thenByDescending { it.quality }
         )
 
-        if (langVoices.isEmpty()) return null
+        if (installedVoices.isEmpty()) return null
 
         val preferredHints = if (persona == VoicePersona.ZEE_MALE) {
             listOf("bnx", "bad", "male", "-d-", "-b-", "tpd", "iom")
@@ -419,10 +590,10 @@ class HumanVoiceEngine(
             listOf("ban", "bnf", "female", "-a-", "-c-", "tpf", "sfg")
         }
 
-        return langVoices.firstOrNull { v ->
+        return installedVoices.firstOrNull { v ->
             val name = v.name.lowercase()
             preferredHints.any { name.contains(it) }
-        } ?: langVoices.firstOrNull()
+        } ?: installedVoices.firstOrNull()
     }
 
     fun cleanTextForNaturalSpeech(raw: String): String {
@@ -436,9 +607,12 @@ class HumanVoiceEngine(
             .trim()
     }
 
-    fun stopSpeaking() {
+    private fun stopPlaybackInternals() {
         currentJob?.cancel()
         currentJob = null
+        activeUtteranceSignal?.let { if (!it.isCompleted) it.complete(false) }
+        activeUtteranceId = null
+        activeUtteranceSignal = null
         offlineNeuralEngine.stop()
         runCatching {
             activeMediaPlayer?.let {
@@ -448,6 +622,15 @@ class HumanVoiceEngine(
         }
         activeMediaPlayer = null
         runCatching { androidTts?.stop() }
+        abandonSpeechAudioFocus()
+    }
+
+    fun stopSpeaking() {
+        sessionCounter.incrementAndGet()
+        stopPlaybackInternals()
+        if (sessionSpeakingActive.getAndSet(false)) {
+            onSpeechDone()
+        }
     }
 
     fun release() {
