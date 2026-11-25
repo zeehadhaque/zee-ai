@@ -13,6 +13,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.zeeai.companion.ai.GeminiNativeClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,8 +26,15 @@ data class VoiceInputUiState(
     val lastError: String? = null
 )
 
+/**
+ * HUD Voice Capture Controller — Pure In-App Listening (No Google Activity Popup).
+ * Prioritizes Direct Hardware AudioRecord + VAD when a Gemini key is configured, with
+ * reusable in-process SpeechRecognizer fallback.
+ */
 class ZeeVoiceInputController(
     private val context: Context,
+    private val geminiClient: GeminiNativeClient = GeminiNativeClient(),
+    private val geminiApiKeyProvider: () -> String = { "" },
     private val onPauseBackgroundWakeWord: () -> Unit = {},
     private val onResumeBackgroundWakeWord: () -> Unit = {},
     private val onFinalTranscript: (String) -> Unit
@@ -36,11 +44,12 @@ class ZeeVoiceInputController(
         private const val GOOGLE_RECOGNITION_PKG = "com.google.android.googlequicksearchbox"
         private const val GOOGLE_TTS_ASR_PKG = "com.google.android.as"
         private const val GOOGLE_SPEECH_PKG = "com.google.android.tts"
-        private const val WATCHDOG_TIMEOUT_MS = 5000L
+        private const val WATCHDOG_TIMEOUT_MS = 3500L
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var speechRecognizer: SpeechRecognizer? = null
+    private val directMicEngine = JarvisAudioMicEngine(geminiClient)
 
     private val _uiState = MutableStateFlow(VoiceInputUiState())
     val uiState: StateFlow<VoiceInputUiState> = _uiState.asStateFlow()
@@ -50,25 +59,23 @@ class ZeeVoiceInputController(
     @Volatile
     private var isPausedForTts = false
     @Volatile
-    private var preferOffline = false
-    @Volatile
     private var preferSystemFallbackService = false
     @Volatile
     private var consecutiveErrorCount = 0
     @Volatile
     private var preferredLocale = "bn-BD"
 
-    var onFallbackToSystemDialog: (() -> Unit)? = null
-
     private val watchdogRunnable = Runnable {
-        if (!_uiState.value.isListening) {
-            Log.w(TAG, "SpeechRecognizer watchdog fired (600ms): onReadyForSpeech never called. Invoking official system dialog fallback.")
+        if (_uiState.value.isListening && !directMicEngine.isRunning()) {
+            Log.w(TAG, "HUD SpeechRecognizer stalled — switching silently to Direct Audio Mic")
             destroyRecognizerOnMain()
-            _uiState.value = _uiState.value.copy(
-                isListening = false,
-                statusHint = "Google Voice ডায়ালগ ওপেন হচ্ছে..."
-            )
-            onFallbackToSystemDialog?.invoke()
+            val key = geminiApiKeyProvider().trim()
+            if (key.isNotBlank()) {
+                startDirectHudCapture()
+            } else {
+                preferSystemFallbackService = !preferSystemFallbackService
+                startInternalOnMain()
+            }
         }
     }
 
@@ -81,10 +88,6 @@ class ZeeVoiceInputController(
 
     fun setLanguage(localeTag: String) {
         preferredLocale = localeTag
-    }
-
-    fun setPreferOffline(offline: Boolean) {
-        preferOffline = offline
     }
 
     fun startListening(continuous: Boolean = false) {
@@ -102,14 +105,19 @@ class ZeeVoiceInputController(
                 return@post
             }
 
-            // 24/7 Background WakeWord সার্ভিসের মাইক আগে রিলিজ করো
             onPauseBackgroundWakeWord()
-            startInternalOnMain()
+
+            if (geminiApiKeyProvider().trim().isNotBlank()) {
+                startDirectHudCapture()
+            } else {
+                startInternalOnMain()
+            }
         }
     }
 
     fun stopListening(resumeWakeWord: Boolean = true) {
         continuousMode = false
+        directMicEngine.stopCapture()
         mainHandler.post {
             mainHandler.removeCallbacksAndMessages(null)
             destroyRecognizerOnMain()
@@ -125,13 +133,14 @@ class ZeeVoiceInputController(
 
     fun pauseForAssistantSpeech() {
         isPausedForTts = true
+        directMicEngine.setPaused(true)
         mainHandler.post {
             mainHandler.removeCallbacksAndMessages(null)
             destroyRecognizerOnMain()
             _uiState.value = _uiState.value.copy(
                 isListening = false,
                 rmsLevel = 0f,
-                statusHint = "ZEE কথা বলছে..."
+                statusHint = "জী কথা বলছে..."
             )
         }
     }
@@ -139,19 +148,61 @@ class ZeeVoiceInputController(
     fun resumeAfterAssistantSpeech() {
         isPausedForTts = false
         if (continuousMode) {
-            mainHandler.postDelayed({
-                if (continuousMode && !isPausedForTts) {
-                    startInternalOnMain()
-                }
-            }, 350L)
+            if (directMicEngine.isRunning()) {
+                directMicEngine.setPaused(false)
+                _uiState.value = _uiState.value.copy(isListening = true, statusHint = "শুনছি... বলুন বস")
+            } else {
+                mainHandler.postDelayed({
+                    if (continuousMode && !isPausedForTts) {
+                        startInternalOnMain()
+                    }
+                }, 300L)
+            }
         } else {
             onResumeBackgroundWakeWord()
         }
     }
 
+    private fun startDirectHudCapture() {
+        destroyRecognizerOnMain()
+        _uiState.value = _uiState.value.copy(
+            isListening = true,
+            lastError = null,
+            partialTranscript = "",
+            statusHint = "JARVIS Audio শুনছে... বলুন বস"
+        )
+        directMicEngine.startContinuousCapture(
+            apiKeyProvider = geminiApiKeyProvider,
+            onRmsLevel = { lvl -> _uiState.value = _uiState.value.copy(rmsLevel = lvl) },
+            onStatus = { hint -> _uiState.value = _uiState.value.copy(statusHint = hint) },
+            onHearingStart = { _uiState.value = _uiState.value.copy(statusHint = "কথা ধরা হচ্ছে...") },
+            onTranscript = { text ->
+                if (text.isNotBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        isListening = continuousMode,
+                        partialTranscript = "",
+                        rmsLevel = 0f,
+                        statusHint = "শোনা হয়েছে"
+                    )
+                    if (!continuousMode) {
+                        directMicEngine.stopCapture()
+                    }
+                    onFinalTranscript(text)
+                }
+            },
+            onError = { err ->
+                _uiState.value = _uiState.value.copy(
+                    isListening = false,
+                    rmsLevel = 0f,
+                    lastError = err,
+                    statusHint = err
+                )
+            }
+        )
+    }
+
     private fun startInternalOnMain() {
         if (isPausedForTts) return
-
         destroyRecognizerOnMain()
 
         _uiState.value = _uiState.value.copy(
@@ -162,19 +213,12 @@ class ZeeVoiceInputController(
 
         val recognizer = createBestRecognizer()
         if (recognizer == null) {
-            Log.w(TAG, "No SpeechRecognizer could be created. Calling fallback system dialog.")
-            _uiState.value = _uiState.value.copy(
-                isListening = false,
-                statusHint = "System Speech Dialog ওপেন হচ্ছে...",
-                lastError = null
-            )
-            onFallbackToSystemDialog?.invoke()
+            val msg = "Settings থেকে Google AI Studio Key দিলে Direct JARVIS Mic চলবে।"
+            _uiState.value = _uiState.value.copy(isListening = false, statusHint = msg, lastError = msg)
             return
         }
 
         speechRecognizer = recognizer
-
-        // Start 600ms watchdog for Xiaomi/HyperOS IPC stalls
         mainHandler.removeCallbacks(watchdogRunnable)
         mainHandler.postDelayed(watchdogRunnable, WATCHDOG_TIMEOUT_MS)
 
@@ -231,7 +275,7 @@ class ZeeVoiceInputController(
                 if (bestText.isNotEmpty()) {
                     onFinalTranscript(bestText)
                 } else if (continuousMode && !isPausedForTts) {
-                    scheduleRestart(350L)
+                    scheduleRestart(300L)
                 }
             }
 
@@ -243,65 +287,40 @@ class ZeeVoiceInputController(
                 if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                     consecutiveErrorCount = 0
                     if (continuousMode && !isPausedForTts) {
-                        scheduleRestart(300L)
+                        scheduleRestart(280L)
                         return
-                    } else {
-                        _uiState.value = _uiState.value.copy(
-                            isListening = false,
-                            rmsLevel = 0f,
-                            lastError = null,
-                            statusHint = "Mic Ready"
-                        )
-                        onResumeBackgroundWakeWord()
                     }
-                } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
-                    destroyRecognizerOnMain()
-                    if (continuousMode && !isPausedForTts) {
-                        scheduleRestart(550L)
-                        return
-                    } else {
-                        _uiState.value = _uiState.value.copy(
-                            isListening = false,
-                            rmsLevel = 0f,
-                            lastError = null,
-                            statusHint = "Mic Ready"
-                        )
-                        onResumeBackgroundWakeWord()
-                    }
-                } else if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
-                    preferredLocale = "en-US"
-                    scheduleRestart(280L)
+                    _uiState.value = _uiState.value.copy(isListening = false, rmsLevel = 0f, lastError = null, statusHint = "Mic Ready")
+                    onResumeBackgroundWakeWord()
                     return
-                } else if (consecutiveErrorCount == 0 && error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                }
+
+                if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
+                    preferredLocale = "en-US"
+                    scheduleRestart(260L)
+                    return
+                }
+
+                if (consecutiveErrorCount == 0 && error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                     consecutiveErrorCount++
                     preferSystemFallbackService = !preferSystemFallbackService
                     _uiState.value = _uiState.value.copy(lastError = null, statusHint = "মাইক রিকানেক্ট হচ্ছে...")
                     scheduleRestart(350L)
                     return
-                } else {
-                    consecutiveErrorCount = 0
-                    if (error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS && onFallbackToSystemDialog != null) {
-                        _uiState.value = _uiState.value.copy(
-                            isListening = false,
-                            rmsLevel = 0f,
-                            statusHint = "Google Voice ডায়ালগ ওপেন হচ্ছে...",
-                            lastError = null
-                        )
-                        onFallbackToSystemDialog?.invoke()
-                        return
-                    }
-                    _uiState.value = _uiState.value.copy(
-                        isListening = false,
-                        rmsLevel = 0f,
-                        statusHint = msg,
-                        lastError = msg
-                    )
-                    if (continuousMode && !isPausedForTts && error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
-                        scheduleRestart(900L)
-                    } else if (!continuousMode) {
-                        onResumeBackgroundWakeWord()
-                    }
                 }
+
+                if (geminiApiKeyProvider().trim().isNotBlank() && error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    startDirectHudCapture()
+                    return
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    isListening = false,
+                    rmsLevel = 0f,
+                    statusHint = msg,
+                    lastError = msg
+                )
+                onResumeBackgroundWakeWord()
             }
 
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -318,19 +337,19 @@ class ZeeVoiceInputController(
 
         runCatching {
             recognizer.startListening(intent)
-        }.onFailure { err ->
-            Log.e(TAG, "startListening crashed: ${err.message}", err)
+        }.onFailure {
             mainHandler.removeCallbacks(watchdogRunnable)
-            onFallbackToSystemDialog?.invoke()
+            if (geminiApiKeyProvider().trim().isNotBlank()) {
+                startDirectHudCapture()
+            }
         }
     }
 
     private fun createBestRecognizer(): SpeechRecognizer? {
         if (!preferSystemFallbackService) {
             val preferredPackages = listOf(GOOGLE_RECOGNITION_PKG, GOOGLE_TTS_ASR_PKG, GOOGLE_SPEECH_PKG)
-            val serviceIntent = Intent("android.speech.RecognitionService")
             val services = runCatching {
-                context.packageManager.queryIntentServices(serviceIntent, 0)
+                context.packageManager.queryIntentServices(Intent("android.speech.RecognitionService"), 0)
             }.getOrDefault(emptyList())
 
             val googleService = preferredPackages.firstNotNullOfOrNull { pkg ->
@@ -345,11 +364,8 @@ class ZeeVoiceInputController(
             }
         }
 
-        val defaultRec = runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
+        return runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
             ?: runCatching { SpeechRecognizer.createSpeechRecognizer(context.applicationContext) }.getOrNull()
-        if (defaultRec != null) return defaultRec
-
-        return null
     }
 
     private fun scheduleRestart(delayMs: Long) {
@@ -369,16 +385,10 @@ class ZeeVoiceInputController(
     }
 
     private fun mapErrorMessage(code: Int): String = when (code) {
-        SpeechRecognizer.ERROR_AUDIO -> "অডিও রেকর্ড সমস্যা — আবার চেষ্টা করো"
+        SpeechRecognizer.ERROR_AUDIO -> "অডিও রেকর্ড সমস্যা — রিসেট হচ্ছে"
         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission বন্ধ আছে"
         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "নেট কানেকশন চেক করো"
-        SpeechRecognizer.ERROR_NO_MATCH -> "কথা বোঝা যায়নি, আরেকবার বলো"
         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "মাইক রিসেট হচ্ছে..."
-        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "কোনো কথা শোনা যায়নি"
         else -> "ভয়েস এরর ($code)"
-    }
-
-    fun release() {
-        stopListening(resumeWakeWord = false)
     }
 }
