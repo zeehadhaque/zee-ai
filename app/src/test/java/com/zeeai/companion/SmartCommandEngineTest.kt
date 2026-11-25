@@ -1,6 +1,7 @@
 package com.zeeai.companion
 
 import com.zeeai.companion.ai.GeminiNativeClient
+import com.zeeai.companion.automation.JarvisScreenAgent
 import com.zeeai.companion.offline.OfflineConversationalBrain
 import com.zeeai.companion.persona.CompanionPersonaEngine
 import com.zeeai.companion.persona.PersonaType
@@ -145,5 +146,13 @@ class SmartCommandEngineTest {
         assertEquals("bn-BD-NabanitaNeural", EdgeNeuralTtsClient.pickVoiceForText("হ্যালো বস", isFemale = true).voiceName)
         assertEquals("en-US-AndrewMultilingualNeural", EdgeNeuralTtsClient.pickVoiceForText("Hello boss", isFemale = false).voiceName)
         assertEquals("en-US-AvaMultilingualNeural", EdgeNeuralTtsClient.pickVoiceForText("Hello boss", isFemale = true).voiceName)
+    }
+
+    @Test
+    fun `jarvis screen agent detects multi-step UI automation prompts accurately`() {
+        assertTrue(JarvisScreenAgent.looksLikeScreenOrMultiStepTask("YouTube khule prothom video ta play koro"))
+        assertTrue(JarvisScreenAgent.looksLikeScreenOrMultiStepTask("Screen e ki ache dekhe comment box e click koro"))
+        assertTrue(JarvisScreenAgent.looksLikeScreenOrMultiStepTask("Scroll kore 3 number post e like dao"))
+        assertFalse(JarvisScreenAgent.looksLikeScreenOrMultiStepTask("What is the capital of Bangladesh?"))
     }
 }
