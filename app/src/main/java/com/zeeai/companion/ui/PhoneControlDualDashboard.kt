@@ -158,9 +158,12 @@ fun PhoneControlDualDashboard(
 
                 val onlineActions = listOf(
                     "▶ Open YouTube" to "open youtube",
+                    "🎬 YT Search Music" to "youtube play bangla lofi music",
+                    "🔍 Google Search" to "google today weather dhaka",
                     "💬 Open WhatsApp" to "open whatsapp",
                     "🌐 Open Chrome" to "open chrome",
-                    "🗺 Open Maps" to "open maps",
+                    "⬇ Scroll Down" to "scroll down",
+                    "⬆ Scroll Up" to "scroll up",
                     "🤖 AI Smart Command" to "আমার ব্যাটারি কত আর এখন কয়টা বাজে বলো"
                 )
 
