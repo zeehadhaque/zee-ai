@@ -9,8 +9,6 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -56,6 +54,7 @@ import com.zeeai.companion.ai.GeminiNativeClient
 import com.zeeai.companion.ai.OfflineChatTurn
 import com.zeeai.companion.ai.RouterConfig
 import com.zeeai.companion.ai.UnifiedCommandAndChatRouter
+import com.zeeai.companion.automation.JarvisScreenAgent
 import com.zeeai.companion.automation.NativePhoneCommander
 import com.zeeai.companion.automation.OfflineAutonomousPhoneController
 import com.zeeai.companion.automation.PendingConfirmation
@@ -110,6 +109,7 @@ fun ZeeNativeApp(
     val dao = remember { database.dao() }
     val geminiClient = remember { GeminiNativeClient() }
     val phoneCommander = remember { NativePhoneCommander(context) }
+    val screenAgent = remember { JarvisScreenAgent(context, geminiClient, phoneCommander) }
     val offlineMemoryVault = remember { PersonalOfflineMemoryVault(context) }
     val offlinePhoneController = remember { OfflineAutonomousPhoneController(context, offlineMemoryVault) }
 
@@ -261,6 +261,8 @@ fun ZeeNativeApp(
     val voiceInputController = remember {
         ZeeVoiceInputController(
             context = context,
+            geminiClient = geminiClient,
+            geminiApiKeyProvider = { keyVault.getKey("gemini_api_key") },
             onPauseBackgroundWakeWord = { WakeWordForegroundService.pause(context) },
             onResumeBackgroundWakeWord = { WakeWordForegroundService.resume(context) },
             onFinalTranscript = { transcript ->
@@ -278,7 +280,7 @@ fun ZeeNativeApp(
     val voiceInputState by voiceInputController.uiState.collectAsState()
 
     val voiceController = remember {
-        NativeVoiceController(context) { speaking ->
+        NativeVoiceController(context, geminiClient) { speaking ->
             isSpeaking = speaking
             if (speaking) {
                 voiceInputController.pauseForAssistantSpeech()
@@ -299,7 +301,7 @@ fun ZeeNativeApp(
         mutableStateOf(ZeeAccessibilityService.isServiceEnabled(context))
     }
 
-    var launchSpeechInputAction by remember { mutableStateOf<() -> Unit>({}) }
+    var startDirectMicAction by remember { mutableStateOf<() -> Unit>({}) }
 
     var hasMic by remember {
         mutableStateOf(
@@ -312,7 +314,7 @@ fun ZeeNativeApp(
     ) { granted ->
         hasMic = granted
         if (granted && activeTab == "companion") {
-            launchSpeechInputAction()
+            startDirectMicAction()
         }
     }
 
@@ -348,6 +350,10 @@ fun ZeeNativeApp(
                         WakeWordEventBus.setPhoneMicSessionDesired(true)
                         voiceController.suspendRecognizerForBackgroundHandoff()
                         WakeWordForegroundService.startHandsFreeControl(context, isFemale = activeCharId == "zhee")
+                        if (Settings.canDrawOverlays(context)) {
+                            ZeeFloatingOverlayService.start(context)
+                            ZeeFloatingOverlayService.updateState(context, "LISTENING", "হ্যান্ডস-ফ্রি JARVIS মাইক চালু আছে বস")
+                        }
                     }
                 }
                 else -> Unit
@@ -558,6 +564,38 @@ fun ZeeNativeApp(
                 PhoneCommandOutcome.NotAPhoneCommand -> Unit
             }
 
+            // Step 1c: Multi-Step Autonomous JARVIS Screen & App Agent
+            val liveGeminiKey = keyVault.getKey("gemini_api_key").trim()
+            if (liveGeminiKey.isNotBlank() && isNetworkAvailable() && JarvisScreenAgent.looksLikeScreenOrMultiStepTask(prompt)) {
+                isGenerating = true
+                val agentResult = withContext(Dispatchers.IO) {
+                    screenAgent.executeGoal(prompt, liveGeminiKey) { stepStatus ->
+                        scope.launch(Dispatchers.Main) {
+                            streamingReply = "🤖 $stepStatus"
+                        }
+                    }
+                }
+                streamingReply = ""
+                val agentReply = agentResult.getOrNull()
+                if (!agentReply.isNullOrBlank()) {
+                    isGenerating = false
+                    dao.insertMessage(
+                        ChatMessageEntity(
+                            id = UUID.randomUUID().toString(),
+                            characterId = activeCharId,
+                            role = "assistant",
+                            text = agentReply,
+                            source = "jarvis-agent"
+                        )
+                    )
+                    jarvisCore.emitBanner(agentReply.take(130))
+                    onReplyCompleted?.invoke(agentReply)
+                    if (autoSpeak || forceSpeak) voiceController.speak(agentReply, voiceProfile)
+                    return@launch
+                }
+                isGenerating = false
+            }
+
             // Step 2: Route through UnifiedCommandAndChatRouter with selected engine & Hermes persona
             isGenerating = true
             streamingReply = ""
@@ -622,42 +660,6 @@ fun ZeeNativeApp(
 
     sendTurnAction = { prompt -> sendUserTurn(prompt) }
 
-    val speechDialogLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            val spoken = matches?.firstOrNull().orEmpty().trim()
-            if (spoken.isNotBlank()) {
-                sendUserTurn(spoken)
-            }
-        }
-    }
-
-    fun launchSpeechInput() {
-        if (!hasMic) {
-            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            return
-        }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "bn-BD")
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "bn-BD")
-            putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("bn-BD", "en-US", "bn-IN"))
-            putExtra(
-                RecognizerIntent.EXTRA_PROMPT,
-                if (activeCharId == "zhee") "ZHEE শুনছে... বলুন বস" else "ZEE শুনছে... বলুন বস"
-            )
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-        }
-        runCatching {
-            speechDialogLauncher.launch(intent)
-        }.onFailure {
-            voiceInputController.setLanguage(voiceProfile.languageTag)
-            voiceInputController.startListening(continuous = jarvisSettings.alwaysOnListening)
-        }
-    }
-
     fun toggleInteractiveMic() {
         voiceController.stopSpeaking()
         if (voiceController.isMicLockedOn.value) {
@@ -667,11 +669,9 @@ fun ZeeNativeApp(
             voiceInputController.stopListening(resumeWakeWord = true)
         } else if (!hasMic) {
             micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        } else if (SpeechRecognizer.isRecognitionAvailable(context)) {
+        } else {
             voiceInputController.setLanguage(voiceProfile.languageTag)
             voiceInputController.startListening(continuous = jarvisSettings.alwaysOnListening)
-        } else {
-            launchSpeechInput()
         }
     }
 
@@ -686,8 +686,7 @@ fun ZeeNativeApp(
         livePartialVoice = ""
     }
 
-    launchSpeechInputAction = { launchSpeechInput() }
-    voiceInputController.onFallbackToSystemDialog = { launchSpeechInput() }
+    startDirectMicAction = { toggleInteractiveMic() }
 
     LaunchedEffect(openMicOnLaunch) {
         if (openMicOnLaunch) {
@@ -1082,7 +1081,7 @@ fun ZeeNativeApp(
                                             onTriggerCodeBlack = { jarvisCore.triggerCodeBlack(true) },
                                             onAcceptProactive = { evt ->
                                                 starkSuperpowers.dismissSuggestion()
-                                                evt.actionCommand?.let { cmd -> sendUserTurn(cmd) } ?: launchSpeechInput()
+                                                evt.actionCommand?.let { cmd -> sendUserTurn(cmd) } ?: toggleInteractiveMic()
                                             },
                                             onDismissProactive = { starkSuperpowers.dismissSuggestion() },
                                             modifier = Modifier.weight(1f).fillMaxWidth()
@@ -1368,6 +1367,8 @@ fun ZeeNativeApp(
                             offlinePhoneController = offlinePhoneController,
                             voiceController = voiceController,
                             voiceProfile = voiceProfile,
+                            geminiClient = geminiClient,
+                            geminiApiKeyProvider = { keyVault.getKey("gemini_api_key") },
                             isNetworkAvailable = { isNetworkAvailable() },
                             isAccessibilityActive = isAccessibilityActive,
                             isAccessibilityConnected = isAccessibilityConnected,
@@ -1897,38 +1898,6 @@ fun ZeeNativeApp(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text("🔄 Sync My ElevenLabs Library Voices", fontSize = 11.sp)
-                                }
-                            }
-
-                            Text("Gemini 2.5 Studio Human Voices (Uses Gemini Key)", color = Color(0xFF34D399), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Row(
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                OnlineHumanVoiceCatalog.geminiMaleVoices.forEach { gv ->
-                                    FilterChip(
-                                        selected = selectedGeminiMale == gv.name,
-                                        onClick = {
-                                            selectedGeminiMale = gv.name
-                                            persistAndSyncVoiceConfig()
-                                        },
-                                        label = { Text("♂ ${gv.name} (${gv.subtitle})", fontSize = 10.5.sp) }
-                                    )
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                OnlineHumanVoiceCatalog.geminiFemaleVoices.forEach { gv ->
-                                    FilterChip(
-                                        selected = selectedGeminiFemale == gv.name,
-                                        onClick = {
-                                            selectedGeminiFemale = gv.name
-                                            persistAndSyncVoiceConfig()
-                                        },
-                                        label = { Text("♀ ${gv.name} (${gv.subtitle})", fontSize = 10.5.sp) }
-                                    )
                                 }
                             }
 
