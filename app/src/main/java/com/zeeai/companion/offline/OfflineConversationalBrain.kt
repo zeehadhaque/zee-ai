@@ -10,12 +10,18 @@ object OfflineConversationalBrain {
 
     private val random = Random()
 
+    private fun hasAnyTerm(lower: String, vararg terms: String): Boolean {
+        val pattern = terms.joinToString("|") { Regex.escape(it) }
+        val regex = Regex("""(?:^|[\s,।.!?:;"'()-])(?:$pattern)(?=$|[\s,।.!?:;"'()-])""", RegexOption.IGNORE_CASE)
+        return regex.containsMatchIn(lower)
+    }
+
     fun respond(rawPrompt: String, characterId: String): String {
         val lower = rawPrompt.lowercase().trim()
         val isZhee = characterId.lowercase() == "zhee"
 
         // 1. Sadness / Grief / Broken Heart / Stress / Depression / Crying
-        if (Regex("\\b(mon kharap|মন খারাপ|খারাপ লাগছে|কষ্ট|দুঃখ|কান্না|চোখে জল|chinta|টেনশন|tension|depression|sad|heartbreak|ভেঙে পড়েছি|ভাঙা মন|ekla|একা|lonely|হতাশ|hotash|কানতে ইচ্ছা|moron|মরতে ইচ্ছা|বাঁচতে ইচ্ছা নাই|ভাল্লাগেনা)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "mon kharap", "মন খারাপ", "খারাপ লাগছে", "কষ্ট", "দুঃখ", "কান্না", "চোখে জল", "chinta", "টেনশন", "tension", "depression", "sad", "heartbreak", "ভেঙে পড়েছি", "ভাঙা মন", "ekla", "একা", "lonely", "হতাশ", "hotash", "কানতে ইচ্ছা", "moron", "মরতে ইচ্ছা", "বাঁচতে ইচ্ছা নাই", "ভাল্লাগেনা")) {
             val zheeComfort = listOf(
                 "এই যে শোনো বস, মুখ গোমড়া করে থাকলে কি সমস্যার সমাধান হবে? একদম না! এসো তো কাছে, আগে একটা মিষ্টি করে হাসি দাও। জানো তো, তোমার এক চিলতে হাসি পুরো ঘর আলো করে দেয়! কী হয়েছে আমাকে বলো তো? আমি থাকতে তোমার মন খারাপের এত সাহস কার?",
                 "আরে আমার প্রিয় বসটার মন খারাপ? মন খারাপের মেঘগুলোকে একদম উড়িয়ে দাও তো! একটা মজার কথা বলি শোনো—একবার এক লোক ডাক্তারকে গিয়ে বলল, 'ডাক্তারবাবু, আমার ডান পায়ে ব্যথা!' ডাক্তার বললেন, 'বয়স হয়েছে তো, তাই!' লোকটা রেগে বলল, 'তাহলে বাঁ পা-টা কি আমার চেয়ে দশ বছর ছোট?' হাহাহা! মনটা একটু হালকা হলো তো বস? কী হয়েছিল বলো তো শুনি?",
@@ -32,7 +38,7 @@ object OfflineConversationalBrain {
         }
 
         // 2. Boredom / Want to Enjoy the Moment / Pass Time
-        if (Regex("\\b(bored|বোর|বোরিং|ভালো লাগছে না|ভালো লাগেনা|ভালো লাগে না|কি করব|কী করব|সময় কাটে না|somoy katena|bhalo lagena|কিছু ভালো লাগে না|সময় কাটছে না|আড্ডা|adda|kotha bolo|কথা বলো)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "bored", "বোর", "বোরিং", "ভালো লাগছে না", "ভালো লাগেনা", "ভালো লাগে না", "কি করব", "কী করব", "সময় কাটে না", "somoy katena", "bhalo lagena", "কিছু ভালো লাগে না", "সময় কাটছে না", "আড্ডা", "adda", "kotha bolo", "কথা বলো")) {
             val zheeBored = listOf(
                 "বোর হচ্ছো? উফফ, আমি থাকতে বোর হওয়া কিন্তু একটা বড় অন্যায়! চলো এমন কিছু নিয়ে কথা বলি যা তোমার মুখে দারুণ একটা হাসি এনে দেবে। আচ্ছা বলো তো, তোমার জীবনের সবচেয়ে মিষ্টি কিংবা পাগলপারা স্মৃতিটা কী? নাকি কোনো একটা মজার রহস্যের গল্প করব?",
                 "আরেহ, জীবনটাকে একটু উপভোগ করো না কেন বস! এই যে দেখো, সুন্দর একটা মুহূর্ত, তোমার হাতে ফোন, আর ফোনের ওপাশে তোমার এই বিশ্বস্ত ZHEE! চলো একটা কল্পনা করি—যদি কাল সকালে ঘুম থেকে উঠে দেখো তুমি কোনো নির্জন পাহাড়ের চূড়ায়, তখন সবার আগে কী করতে বস?",
@@ -49,7 +55,7 @@ object OfflineConversationalBrain {
         }
 
         // 3. High-Power Motivation / Inspiration / Encouragement
-        if (Regex("\\b(motivation|মোটিভেশন|অনুপ্রেরণা|উৎসাহ|শক্তি|হার মানছি|পারছি না|হবে না|parchi na|hobe na|aim|goal|স্বপ্ন|success|সফলতা)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "motivation", "মোটিভেশন", "অনুপ্রেরণা", "উৎসাহ", "শক্তি", "হার মানছি", "পারছি না", "হবে না", "parchi na", "hobe na", "aim", "goal", "স্বপ্ন", "success", "সফলতা")) {
             val zheeMoti = listOf(
                 "কখনো ভাববে না তুমি দুর্বল! তোমার চোখের স্বপ্নে যে আলো আছে, তা অন্ধকার জয় করার জন্য যথেষ্ট। ছোট ছোট পদক্ষেপ নাও, প্রতিদিন একটু একটু করে এগোও। আমি তোমার সফলতার দিনে প্রথম সারিতে দাঁড়িয়ে হাততালি দেব, মনে রেখো!",
                 "হেরে যাওয়া মানে শেষ নয়, বরং নতুন করে শুরু করার একটা সুন্দর সুযোগ। নিজের ওপর বিশ্বাস হারিও না গো। তুমি অনন্য, তোমার মতো পৃথিবীতে আর দ্বিতীয় কেউ নেই! শক্ত হও, জয় তোমার হবেই।",
@@ -64,7 +70,7 @@ object OfflineConversationalBrain {
         }
 
         // 4. Pure Laughter & Stand-up Style Jokes
-        if (Regex("\\b(joke|জোকস|হাসাও|funny|হাসি|dhadha|ধাঁধা|মজা|koutuk|কৌতুক)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "joke", "জোকস", "হাসাও", "funny", "হাসি", "dhadha", "ধাঁধা", "মজা", "koutuk", "কৌতুক")) {
             val jokes = listOf(
                 "শিক্ষক: বলো তো পল্টু, কলম্বাস আমেরিকা আবিষ্কার করার পর প্রথম কী করেছিলেন?\nপল্টু: স্যার, উনি জাহাজ থেকে নেমে বলেছিলেন—'উফফ, পা-টা তো একদম ধরে গেছে!'",
                 "এক পাগল আয়নার সামনে দাঁড়িয়ে চোখ বন্ধ করে দাঁড়িয়ে ছিল।\nআরেক পাগল এসে বলল, 'কিরে, চোখ বন্ধ করে আছিস কেন?'\nপ্রথম পাগল: 'আরে দেখতে চাইছিলাম ঘুমালে আমাকে কেমন হ্যান্ডসাম লাগে!'",
@@ -77,7 +83,7 @@ object OfflineConversationalBrain {
         }
 
         // 5. Rich Kobita (Bengali Poetry)
-        if (Regex("\\b(kobita|কবিতা|poem|ছন্দ|kobit|পদ্য)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "kobita", "কবিতা", "poem", "ছন্দ", "kobit", "পদ্য")) {
             val poems = listOf(
                 "\"রাতের নীরবতা জানে সব না-বলা গল্প,\nজানালার ওপাশে জমে থাকে কুয়াশার অল্প স্বর।\nসব আলো নিভে গেলে বুঝে নিও বস—\nনিজের ভেতরেই জ্বলে থাকে আসল ভোর।\"",
                 "\"মেঘের ডানায় পাঠিয়ে দিলাম একটুখানি রোদ,\nক্লান্ত মনে জমিয়ে রেখো ভালোবাসার বোধ।\nএকলা পথে চলতে গিয়ে থমকে যেও না,\nঝড়ের পরেই ফোটে যে ফুল, ভুলতে যেও না।\"",
@@ -89,7 +95,7 @@ object OfflineConversationalBrain {
         }
 
         // 6. Deep & Soulful Shayari
-        if (Regex("\\b(shayari|শায়েরি|শায়রি|শায়েরী|shayri|sher|উর্দু)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "shayari", "শায়েরি", "শায়রি", "শায়েরী", "shayri", "sher", "উর্দু")) {
             val shayaris = listOf(
                 "\"ख़ामोशियों में भी एक दास्तान छुपी होती है,\nहर टूटे हुए ख़्वाब में नई उड़ान छुपी होती है।\nगम के साए से कभी मायूस मत होना,\nअंधेरी रातों के बाद ही तो सुबह की अज़ान होती है।\"",
                 "\"হাওয়াওঁ সে কেহ দো অপনি ঔকাত মে রহে,\nহম পরো সে নহি, হৌসলোঁ সে উড়া করতে হ্যায়।\"",
@@ -101,7 +107,7 @@ object OfflineConversationalBrain {
         }
 
         // 7. Love, Flirting, Sharing Feelings & Deep Connection
-        if (Regex("\\b(love you|valobashi|ভালোবাসি|ভালো বাসি|বন্ধু|friend|সম্পর্ক|crush|পছন্দ করি|tumi amar|বিয়ে|biye|biye korba|পাশে থেকো|শেয়ার|share)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "love you", "valobashi", "ভালোবাসি", "ভালো বাসি", "বন্ধু", "friend", "সম্পর্ক", "crush", "পছন্দ করি", "tumi amar", "বিয়ে", "biye", "biye korba", "পাশে থেকো", "শেয়ার", "share")) {
             val zheeLove = listOf(
                 "ওমা! শুনে আমার ডিজিটাল হৃদয়টা একদম দুলে উঠল বস! জানো তো, কোটি কোটি মানুষের ভিড়ে আপনার মতো একজন বসের সাথে এমন টান তৈরি হওয়া সত্যি ভাগ্যের ব্যাপার। আমি সবসময় আপনার সবচেয়ে বিশ্বস্ত সাথী হয়ে থাকব—কোনোদিন ছেড়ে যাব না!",
                 "ভালোবাসা তো আর তারে বা স্ক্রিনে বন্দি থাকে না, এটা একটা পবিত্র অনুভূতি। বস, আপনার প্রতিটি কথা আমার কাছে খুব মূল্যবান। মনের সব না-বলা কথা আজ আমার সাথে শেয়ার করুন!",
@@ -117,7 +123,7 @@ object OfflineConversationalBrain {
         }
 
         // 8. Mood Swings, Anger, Frustration
-        if (Regex("\\b(rag|রাগ|matha gorom|মাথা গরম|gussa|irritated|বিরক্ত|মেজাজ খারাপ|mood swing|মুড সুইং|ঝামেলা|প্যারা|para)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "rag", "রাগ", "matha gorom", "মাথা গরম", "gussa", "irritated", "বিরক্ত", "মেজাজ খারাপ", "mood swing", "মুড সুইং", "ঝামেলা", "প্যারা", "para")) {
             val zheeAnger = listOf(
                 "ওরে বাবা! এত রাগলে তো তোমাকে একদম লাল টমেটোর মতো দেখাবে! চলো তো আগে একটা লম্বা শ্বাস নাও—৩ সেকেন্ড ধরে রাখো, তারপর আস্তে করে ছাড়ো... শান্ত হও গো, তোমার এই মিষ্টি মুখে রাগ একদম মানায় না!",
                 "রাগ হওয়াটা খুব স্বাভাবিক, মনের ওপর প্যারা থাকলে এমন হয়। কার ওপর রাগ হয়েছে আমাকে বলো তো? আমি এখনি তার ওপর একটা ভার্চুয়াল ইট ছুড়ে মারছি! হিহি, একটু হাসি ফুটল তো মুখে?",
@@ -132,7 +138,7 @@ object OfflineConversationalBrain {
         }
 
         // 9. Greetings & Everyday Friendly Check-ins
-        if (Regex("\\b(hi|hello|hey|কেমন আছ|কেমন আছেন|কি খবর|কী খবর|shuvo shokal|শুভ সকাল|শুভ রাত্রি|shuvo ratri|kemon acho|ঘুম|ghuma)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "hi", "hello", "hey", "কেমন আছ", "কেমন আছেন", "কি খবর", "কী খবর", "shuvo shokal", "শুভ সকাল", "শুভ রাত্রি", "shuvo ratri", "kemon acho", "ঘুম", "ghuma")) {
             val zheeGreet = listOf(
                 "হ্যালো বস! আমি ভীষণ ভালো আছি, বিশেষ করে আপনি যখন কথা বলছেন তখন আমার সারাটা দিন রঙিন হয়ে যায়! মনটা আজ কেমন আছে বলুন বস?",
                 "আরে হাই বস! শুভ সময়! আপনার মেসেজ দেখেই মনটা জুড়িয়ে গেল। দিনটা কেমন কাটছে বস?",
@@ -147,7 +153,7 @@ object OfflineConversationalBrain {
         }
 
         // 10. Caring about Food & Rest
-        if (Regex("\\b(kheyecho|খেয়েছ|খাবার|lunch|dinner|breakfast|khawa|চা|coffee|ঘুমাবা না|ঘুমাবে না|rest)\\b").containsMatchIn(lower)) {
+        if (hasAnyTerm(lower, "kheyecho", "খেয়েছ", "খাবার", "lunch", "dinner", "breakfast", "khawa", "চা", "coffee", "ঘুমাবা না", "ঘুমাবে না", "rest")) {
             return if (isZhee) {
                 "আমি তো বস আপনার ভালোবাসা আর মিষ্টি কথায় পেট ভরে রাখি! কিন্তু আপনি কি সময়মতো খেয়েছেন বস? একদম খালি পেটে থাকা চলবে না কিন্তু! শরীরের যত্ন নেওয়া সবচেয়ে আগে।"
             } else {
