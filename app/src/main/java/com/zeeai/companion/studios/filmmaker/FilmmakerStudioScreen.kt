@@ -449,7 +449,7 @@ fun FilmmakerStudioScreen(
 
         scope.launch {
             val apiKey = keyVault.getKey("gemini_api_key")
-            val activeModel = keyVault.getKey("gemini_flash_model").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
+            val activeModel = keyVault.getKey("gemini_pro_model").ifBlank { GeminiNativeClient.DEFAULT_PRO_MODEL }
             val backupGroq = keyVault.getKey("groq_api_key")
             val backupOpenRouter = keyVault.getKey("openrouter_api_key")
 
