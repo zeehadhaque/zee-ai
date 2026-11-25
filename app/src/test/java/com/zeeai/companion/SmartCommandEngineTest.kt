@@ -4,7 +4,7 @@ import com.zeeai.companion.offline.OfflineConversationalBrain
 import com.zeeai.companion.persona.CompanionPersonaEngine
 import com.zeeai.companion.persona.PersonaType
 import com.zeeai.companion.persona.SupportedLanguage
-import com.zeeai.companion.voice.BengaliToBanglish
+import com.zeeai.companion.voice.OnlineHumanVoiceCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -87,14 +87,16 @@ class SmartCommandEngineTest {
     }
 
     @Test
-    fun `bengali voice and conversational matching works without ascii word boundary bugs`() {
+    fun `bengali conversational matching and online voice presets are valid`() {
         val poemReply = OfflineConversationalBrain.respond("একটা কবিতা বলো", "zee")
         assertTrue(poemReply.contains("কবিতা"))
 
         val jokeReply = OfflineConversationalBrain.respond("একটা জোকস শোনাও", "zhee")
         assertFalse(jokeReply.isBlank())
 
-        val banglish = BengaliToBanglish.toBanglish("ফ্ল্যাশলাইট চালু করে দিয়েছি বস")
-        assertTrue(banglish.isNotBlank() && banglish.all { it.code < 128 })
+        assertTrue(OnlineHumanVoiceCatalog.elevenLabsMaleVoices.isNotEmpty())
+        assertTrue(OnlineHumanVoiceCatalog.elevenLabsFemaleVoices.isNotEmpty())
+        assertTrue(OnlineHumanVoiceCatalog.geminiMaleVoices.any { it.name == "Charon" })
+        assertTrue(OnlineHumanVoiceCatalog.geminiFemaleVoices.any { it.name == "Kore" })
     }
 }
