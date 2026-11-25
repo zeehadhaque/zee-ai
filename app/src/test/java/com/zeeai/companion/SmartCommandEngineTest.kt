@@ -1,9 +1,12 @@
 package com.zeeai.companion
 
+import com.zeeai.companion.offline.OfflineConversationalBrain
 import com.zeeai.companion.persona.CompanionPersonaEngine
 import com.zeeai.companion.persona.PersonaType
 import com.zeeai.companion.persona.SupportedLanguage
+import com.zeeai.companion.voice.BengaliToBanglish
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -81,5 +84,17 @@ class SmartCommandEngineTest {
             SupportedLanguage.ENGLISH,
             CompanionPersonaEngine.detectLanguage("Turn on the flashlight and check battery")
         )
+    }
+
+    @Test
+    fun `bengali voice and conversational matching works without ascii word boundary bugs`() {
+        val poemReply = OfflineConversationalBrain.respond("একটা কবিতা বলো", "zee")
+        assertTrue(poemReply.contains("কবিতা"))
+
+        val jokeReply = OfflineConversationalBrain.respond("একটা জোকস শোনাও", "zhee")
+        assertFalse(jokeReply.isBlank())
+
+        val banglish = BengaliToBanglish.toBanglish("ফ্ল্যাশলাইট চালু করে দিয়েছি বস")
+        assertTrue(banglish.isNotBlank() && banglish.all { it.code < 128 })
     }
 }
