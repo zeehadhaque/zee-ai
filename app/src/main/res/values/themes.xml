@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#FF05070E</item>
-        <item name="android:navigationBarColor">#FF05070E</item>
-        <item name="android:windowBackground">#FF05070E</item>
+        <item name="android:statusBarColor">#02040A</item>
+        <item name="android:navigationBarColor">#02040A</item>
+        <item name="android:windowBackground">#02040A</item>
     </style>
+    <style name="Theme.ZeeAI" parent="AppTheme" />
 </resources>
