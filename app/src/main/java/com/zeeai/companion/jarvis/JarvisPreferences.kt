@@ -82,13 +82,12 @@ data class JarvisSettingsSnapshot(
 class JarvisPreferences(context: Context) {
     companion object {
         val PROVIDER_PRESETS = listOf(
-            ProviderPreset("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
+            ProviderPreset("gemini", "Google Gemini (Auto)", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
             ProviderPreset("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
             ProviderPreset("openai", "OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"),
             ProviderPreset("groq", "Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
             ProviderPreset("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
             ProviderPreset("nvidia", "NVIDIA NIM", "https://integrate.api.nvidia.com/v1", "meta/llama-3.3-70b-instruct"),
-            ProviderPreset("ollama", "Ollama (Local)", "http://127.0.0.1:11434/v1", "llama3.2"),
             ProviderPreset("custom", "Custom OpenAI", "", "")
         )
     }
@@ -144,8 +143,19 @@ class JarvisPreferences(context: Context) {
             formality = form,
             humor = hum,
             emotionalAwareness = prefs.getBoolean("emotional_awareness", true),
-            aiProviderPreset = prefs.getString("ai_preset", "gemini").orEmpty(),
-            aiBaseUrl = prefs.getString("ai_base_url", "https://generativelanguage.googleapis.com/v1beta").orEmpty(),
+            aiProviderPreset = run {
+                val savedPreset = prefs.getString("ai_preset", "gemini").orEmpty()
+                if (savedPreset == "ollama" || savedPreset.isBlank()) "gemini" else savedPreset
+            },
+            aiBaseUrl = run {
+                val savedPreset = prefs.getString("ai_preset", "gemini").orEmpty()
+                val normalizedPreset = if (savedPreset == "ollama" || savedPreset.isBlank()) "gemini" else savedPreset
+                if (normalizedPreset == "gemini") {
+                    "https://generativelanguage.googleapis.com/v1beta"
+                } else {
+                    prefs.getString("ai_base_url", "https://generativelanguage.googleapis.com/v1beta").orEmpty()
+                }
+            },
             aiCustomModel = prefs.getString("ai_custom_model", "gemini-2.5-flash").orEmpty(),
             temperature = prefs.getFloat("temperature", 0.7f),
             maxTokens = prefs.getInt("max_tokens", 2048).coerceIn(256, 8192),
