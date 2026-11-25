@@ -1020,13 +1020,6 @@ fun AutonomousCoreSettingsScreen(
         SectionTitle("PRIVACY GOVERNANCE & PERMISSIONS", LuxuryPalette.ElectricCyan)
         LuxuryGlassCard {
             LuxuryGlassSwitchTile(
-                title = "Local-First Privacy Lock",
-                subtitle = "Prefer on-device Gemma AI and keep workspace telemetry offline",
-                checked = snap.localFirstPrivacy,
-                onCheckedChange = { b -> jarvisCore.prefs.update { it.copy(localFirstPrivacy = b) } },
-                accentColor = LuxuryPalette.ElectricCyan
-            )
-            LuxuryGlassSwitchTile(
                 title = "Confirm Sensitive Device Actions",
                 subtitle = "Ask Boss before critical calls, purchases or irreversible steps",
                 checked = snap.confirmRiskyActions,
