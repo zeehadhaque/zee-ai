@@ -1,12 +1,10 @@
 package com.zeeai.companion.automation
 
 import android.Manifest
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
-import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -32,12 +30,14 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zeeai.companion.ai.GeminiNativeClient
 import com.zeeai.companion.voice.NativeVoiceController
 import com.zeeai.companion.voice.NativeVoiceProfile
 import com.zeeai.companion.voice.VoiceState
 import com.zeeai.companion.voice.WakeWordEventBus
 import com.zeeai.companion.voice.WakeWordForegroundService
 import com.zeeai.companion.ui.PhoneControlDualDashboard
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,6 +64,8 @@ fun PhoneControlScreen(
     offlinePhoneController: OfflineAutonomousPhoneController? = null,
     voiceController: NativeVoiceController,
     voiceProfile: NativeVoiceProfile,
+    geminiClient: GeminiNativeClient? = null,
+    geminiApiKeyProvider: () -> String = { "" },
     isNetworkAvailable: () -> Boolean,
     isAccessibilityActive: Boolean,
     isAccessibilityConnected: Boolean,
@@ -75,11 +77,16 @@ fun PhoneControlScreen(
     onGeneralPromptWithReply: ((String, (String) -> Unit) -> Unit)? = null,
     onShowConfirmation: (PendingConfirmation) -> Unit
 ) {
+    val coroutineScope = rememberCoroutineScope()
     val isMicLockedOn by voiceController.isMicLockedOn.collectAsState()
+    val usingDirectJarvisMic by voiceController.usingDirectJarvisMic.collectAsState()
     val voiceState by voiceController.voiceState.collectAsState()
     val micRmsLevel by voiceController.micRmsLevel.collectAsState()
     val micStatusHint by voiceController.statusHint.collectAsState()
     val micLastError by voiceController.lastError.collectAsState()
+    val screenAgent = remember(geminiClient, phoneCommander) {
+        geminiClient?.let { JarvisScreenAgent(context, it, phoneCommander) }
+    }
 
     var liveVoiceText by remember { mutableStateOf("") }
     var textCommandInput by remember { mutableStateOf("") }
@@ -123,11 +130,45 @@ fun PhoneControlScreen(
             return
         }
 
+        val apiKey = geminiApiKeyProvider().trim()
+        if (screenAgent != null && apiKey.isNotBlank() && isNetworkAvailable() && JarvisScreenAgent.looksLikeScreenOrMultiStepTask(clean)) {
+            voiceController.pauseListeningForProcessing()
+            actionLogs.add(0, PhoneActionLog(command = clean, result = "🤖 JARVIS Screen Agent কাজ শুরু করেছে..."))
+            coroutineScope.launch {
+                val res = screenAgent.executeGoal(clean, apiKey) { stepMsg ->
+                    val idx = actionLogs.indexOfFirst { it.command == clean && it.result.startsWith("🤖") }
+                    if (idx >= 0) {
+                        actionLogs[idx] = actionLogs[idx].copy(result = "🤖 $stepMsg")
+                    }
+                }
+                res.onSuccess { reply ->
+                    val idx = actionLogs.indexOfFirst { it.command == clean && it.result.startsWith("🤖") }
+                    if (idx >= 0) actionLogs[idx] = actionLogs[idx].copy(result = reply)
+                    else actionLogs.add(0, PhoneActionLog(command = clean, result = reply))
+                    voiceController.speak(reply, voiceProfile, online = isNetworkAvailable())
+                    voiceController.resumeListeningAfterProcessing()
+                }.onFailure {
+                    if (onGeneralPromptWithReply != null) {
+                        onGeneralPromptWithReply(clean) { reply ->
+                            val idx = actionLogs.indexOfFirst { it.command == clean && it.result.startsWith("🤖") }
+                            if (idx >= 0) actionLogs[idx] = actionLogs[idx].copy(result = reply)
+                            else actionLogs.add(0, PhoneActionLog(command = clean, result = reply))
+                            voiceController.resumeListeningAfterProcessing()
+                        }
+                    } else {
+                        voiceController.resumeListeningAfterProcessing()
+                        onGeneralPrompt(clean)
+                    }
+                }
+            }
+            return
+        }
+
         if (onGeneralPromptWithReply != null) {
             voiceController.pauseListeningForProcessing()
-            actionLogs.add(0, PhoneActionLog(command = clean, result = "Processing AI command..."))
+            actionLogs.add(0, PhoneActionLog(command = clean, result = "জবাব তৈরি হচ্ছে বস..."))
             onGeneralPromptWithReply(clean) { reply ->
-                val idx = actionLogs.indexOfFirst { it.command == clean && it.result == "Processing AI command..." }
+                val idx = actionLogs.indexOfFirst { it.command == clean && it.result == "জবাব তৈরি হচ্ছে বস..." }
                 if (idx >= 0) {
                     actionLogs[idx] = actionLogs[idx].copy(result = reply)
                 } else {
@@ -136,51 +177,8 @@ fun PhoneControlScreen(
                 voiceController.resumeListeningAfterProcessing()
             }
         } else {
-            actionLogs.add(0, PhoneActionLog(command = clean, result = "Sent to AI Companion"))
+            actionLogs.add(0, PhoneActionLog(command = clean, result = "AI কমান্ড পাঠানো হয়েছে বস"))
             onGeneralPrompt(clean)
-        }
-    }
-
-    val phoneSpeechDialogLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            val spoken = matches?.firstOrNull().orEmpty().trim()
-            if (spoken.isNotBlank()) {
-                liveVoiceText = ""
-                executePhoneCommand(spoken)
-            }
-        }
-    }
-
-    fun launchSystemVoicePopup() {
-        if (!voiceController.hasMicPermission() && !hasMic) {
-            onRequestMic()
-            return
-        }
-        voiceController.clearError()
-        // Release continuous recognizer first so system Google Voice Popup doesn't hit mic busy
-        if (voiceController.isMicLockedOn.value) {
-            voiceController.stopListening(resumeWakeWord = false)
-        }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, voiceProfile.languageTag)
-            putExtra(
-                RecognizerIntent.EXTRA_PROMPT,
-                if (activeCharId == "zhee") "ZHEE Phone Control — বলুন বস" else "ZEE Phone Control — কমান্ড বলুন বস"
-            )
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-        }
-        runCatching { phoneSpeechDialogLauncher.launch(intent) }.onFailure { err ->
-            actionLogs.add(
-                0,
-                PhoneActionLog(
-                    command = "Mic Popup",
-                    result = "⚠️ Google app voice popup unavailable (${err.localizedMessage ?: "Install/Enable Google App"})"
-                )
-            )
         }
     }
 
@@ -198,7 +196,7 @@ fun PhoneControlScreen(
                     executePhoneCommand(spokenText)
                 }
             },
-            onError = { /* handled seamlessly via watchdog & Google Voice Popup fallback */ }
+            onError = { /* Pure AudioRecord VAD / silent recognizer handles recovery without popups */ }
         )
     }
 
@@ -213,13 +211,6 @@ fun PhoneControlScreen(
             }
         } else {
             startAfterMicGrant = false
-        }
-    }
-
-    DisposableEffect(voiceController) {
-        voiceController.onFallbackToSystemDialog = { launchSystemVoicePopup() }
-        onDispose {
-            voiceController.onFallbackToSystemDialog = null
         }
     }
 
@@ -393,18 +384,36 @@ fun PhoneControlScreen(
 
             Text(
                 if (isMicLockedOn) micStatusHint
-                else "Tap to start Phone Control Mic (Continuous voice commands + spoken replies)",
+                else "Tap to start Pure JARVIS Mic (Zero Google Popup • Continuous Multi-App Commands)",
                 color = if (isMicLockedOn) Color(0xFFFCD34D) else Silver,
                 fontSize = 11.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = { launchSystemVoicePopup() },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (usingDirectJarvisMic) Color(0xFF064E3B) else Color(0xFF0F172A),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .border(
+                            1.dp,
+                            if (usingDirectJarvisMic) NeonEmerald else Cyan.copy(alpha = 0.5f),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
-                    Text("🎤 Google Voice Popup", fontSize = 11.sp, color = Cyan)
+                    Text(
+                        if (usingDirectJarvisMic) "⚡ Pure JARVIS Mic Live (Zero Google Popup)"
+                        else "🎙️ Google-Free In-App Mic Ready",
+                        fontSize = 11.sp,
+                        color = if (usingDirectJarvisMic) NeonEmerald else Cyan,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
                 if (voiceState == VoiceState.SPEAKING) {
                     OutlinedButton(
