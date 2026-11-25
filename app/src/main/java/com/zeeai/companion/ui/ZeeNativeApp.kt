@@ -328,7 +328,7 @@ fun ZeeNativeApp(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasMic = granted
-        if (granted) {
+        if (granted && activeTab == "companion") {
             launchSpeechInputAction()
         }
     }
@@ -420,6 +420,12 @@ fun ZeeNativeApp(
         voiceController.setApiKeys(activeGeminiKey, activeElevenLabsKey, isAppOnline)
     }
 
+    LaunchedEffect(voiceInputController, voiceController) {
+        voiceController.onBeforeManualMicStart = {
+            voiceInputController.stopListening(resumeWakeWord = false)
+        }
+    }
+
     val unifiedRouter = remember {
         UnifiedCommandAndChatRouter(
             context = context,
@@ -461,14 +467,22 @@ fun ZeeNativeApp(
         else -> customProviderKeyDraft.ifBlank { keyVault.getKey("gemini_api_key") }
     }
 
-    fun sendUserTurn(rawPrompt: String) {
+    fun sendUserTurn(
+        rawPrompt: String,
+        forceSpeak: Boolean = false,
+        onReplyCompleted: ((String) -> Unit)? = null
+    ) {
         val prompt = rawPrompt.trim()
-        if (prompt.isEmpty()) return
+        if (prompt.isEmpty()) {
+            onReplyCompleted?.invoke("")
+            return
+        }
 
         if (codeBlackActive) {
             val l = prompt.lowercase()
             if (l.contains("unlock") || l.contains("disarm") || l.contains("alpha") || l.contains("খোল")) {
                 jarvisCore.unlockCodeBlack()
+                onReplyCompleted?.invoke("Unlocked")
                 return
             }
         }
@@ -505,7 +519,8 @@ fun ZeeNativeApp(
                     )
                 )
                 jarvisCore.emitBanner(protocolReply)
-                if (autoSpeak) voiceController.speak(protocolReply, voiceProfile)
+                onReplyCompleted?.invoke(protocolReply)
+                if (autoSpeak || forceSpeak) voiceController.speak(protocolReply, voiceProfile)
                 return@launch
             }
             if (jarvisSettings.smartHomeEnabled && (prompt.contains("smart", ignoreCase = true) || prompt.contains("home assistant", ignoreCase = true) || prompt.contains("স্মার্ট লাইট"))) {
@@ -520,7 +535,8 @@ fun ZeeNativeApp(
                     )
                 )
                 jarvisCore.emitBanner(shReply)
-                if (autoSpeak) voiceController.speak(shReply, voiceProfile)
+                onReplyCompleted?.invoke(shReply)
+                if (autoSpeak || forceSpeak) voiceController.speak(shReply, voiceProfile)
                 return@launch
             }
 
@@ -537,7 +553,8 @@ fun ZeeNativeApp(
                     )
                 )
                 jarvisCore.emitBanner(instantPhoneOutcome.reply)
-                if (autoSpeak) voiceController.speak(instantPhoneOutcome.reply, voiceProfile)
+                onReplyCompleted?.invoke(instantPhoneOutcome.reply)
+                if (autoSpeak || forceSpeak) voiceController.speak(instantPhoneOutcome.reply, voiceProfile)
                 return@launch
             }
 
@@ -554,11 +571,13 @@ fun ZeeNativeApp(
                         )
                     )
                     jarvisCore.emitBanner(outcome.replyText)
-                    if (autoSpeak) voiceController.speak(outcome.replyText, voiceProfile)
+                    onReplyCompleted?.invoke(outcome.replyText)
+                    if (autoSpeak || forceSpeak) voiceController.speak(outcome.replyText, voiceProfile)
                     return@launch
                 }
                 is PhoneCommandOutcome.NeedsConfirmation -> {
                     pendingConfirm = outcome.confirmation
+                    onReplyCompleted?.invoke(outcome.confirmation.title)
                     return@launch
                 }
                 PhoneCommandOutcome.NotAPhoneCommand -> Unit
@@ -619,8 +638,9 @@ fun ZeeNativeApp(
             if (jarvisSettings.appMode == ZeeAppMode.HUD) {
                 jarvisCore.emitBanner(reply.take(130))
             }
-            if (autoSpeak && reply.isNotBlank()) {
-                val cleanSpeak = reply.substringBefore("\n\n⚡").substringBefore("\n\n[Action")
+            val cleanSpeak = reply.substringBefore("\n\n⚡").substringBefore("\n\n[Action")
+            onReplyCompleted?.invoke(reply)
+            if ((autoSpeak || forceSpeak) && reply.isNotBlank()) {
                 voiceController.speak(cleanSpeak.ifBlank { reply }, voiceProfile)
             }
         }
@@ -666,6 +686,9 @@ fun ZeeNativeApp(
 
     fun toggleInteractiveMic() {
         voiceController.stopSpeaking()
+        if (voiceController.isMicLockedOn.value) {
+            voiceController.stopListening(resumeWakeWord = false)
+        }
         if (voiceInputState.isListening) {
             voiceInputController.stopListening(resumeWakeWord = true)
         } else if (!hasMic) {
@@ -1410,6 +1433,7 @@ fun ZeeNativeApp(
                         "phone_control" -> PhoneControlScreen(
                             context = context,
                             phoneCommander = phoneCommander,
+                            offlinePhoneController = offlinePhoneController,
                             voiceController = voiceController,
                             voiceProfile = voiceProfile,
                             isNetworkAvailable = { isNetworkAvailable() },
@@ -1419,7 +1443,10 @@ fun ZeeNativeApp(
                             onRequestMic = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                             activeCharId = activeCharId,
                             onCharChanged = { activeCharId = it },
-                            onGeneralPrompt = { sendUserTurn(it) },
+                            onGeneralPrompt = { sendUserTurn(it, forceSpeak = true) },
+                            onGeneralPromptWithReply = { prompt, cb ->
+                                sendUserTurn(prompt, forceSpeak = true, onReplyCompleted = cb)
+                            },
                             onShowConfirmation = { pendingConfirm = it }
                         )
 
@@ -1579,6 +1606,8 @@ fun ZeeNativeApp(
                                         onClick = {
                                             if (isWakeRunning) {
                                                 WakeWordForegroundService.stop(context)
+                                            } else if (!hasMic) {
+                                                micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                             } else {
                                                 WakeWordForegroundService.start(context)
                                                 runCatching {
