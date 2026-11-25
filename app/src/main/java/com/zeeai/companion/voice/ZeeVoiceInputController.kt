@@ -52,6 +52,10 @@ class ZeeVoiceInputController(
     @Volatile
     private var preferOffline = false
     @Volatile
+    private var preferSystemFallbackService = false
+    @Volatile
+    private var consecutiveErrorCount = 0
+    @Volatile
     private var preferredLocale = "bn-BD"
 
     var onFallbackToSystemDialog: (() -> Unit)? = null
@@ -86,6 +90,8 @@ class ZeeVoiceInputController(
     fun startListening(continuous: Boolean = false) {
         continuousMode = continuous
         isPausedForTts = false
+        consecutiveErrorCount = 0
+        preferSystemFallbackService = false
         mainHandler.post {
             if (!hasMicPermission()) {
                 _uiState.value = _uiState.value.copy(
@@ -235,6 +241,7 @@ class ZeeVoiceInputController(
                 Log.w(TAG, "SpeechRecognizer error=$error ($msg)")
 
                 if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    consecutiveErrorCount = 0
                     if (continuousMode && !isPausedForTts) {
                         scheduleRestart(300L)
                         return
@@ -242,6 +249,7 @@ class ZeeVoiceInputController(
                         _uiState.value = _uiState.value.copy(
                             isListening = false,
                             rmsLevel = 0f,
+                            lastError = null,
                             statusHint = "Mic Ready"
                         )
                         onResumeBackgroundWakeWord()
@@ -249,30 +257,39 @@ class ZeeVoiceInputController(
                 } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
                     destroyRecognizerOnMain()
                     if (continuousMode && !isPausedForTts) {
-                        scheduleRestart(600L)
+                        scheduleRestart(550L)
                         return
                     } else {
                         _uiState.value = _uiState.value.copy(
                             isListening = false,
                             rmsLevel = 0f,
+                            lastError = null,
                             statusHint = "Mic Ready"
                         )
                         onResumeBackgroundWakeWord()
                     }
                 } else if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
                     preferredLocale = "en-US"
-                    if (continuousMode && !isPausedForTts) {
-                        scheduleRestart(350L)
-                        return
-                    } else {
+                    scheduleRestart(280L)
+                    return
+                } else if (consecutiveErrorCount == 0 && error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    consecutiveErrorCount++
+                    preferSystemFallbackService = !preferSystemFallbackService
+                    _uiState.value = _uiState.value.copy(lastError = null, statusHint = "মাইক রিকানেক্ট হচ্ছে...")
+                    scheduleRestart(350L)
+                    return
+                } else {
+                    consecutiveErrorCount = 0
+                    if (error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS && onFallbackToSystemDialog != null) {
                         _uiState.value = _uiState.value.copy(
                             isListening = false,
                             rmsLevel = 0f,
-                            statusHint = "Language not supported"
+                            statusHint = "Google Voice ডায়ালগ ওপেন হচ্ছে...",
+                            lastError = null
                         )
-                        onResumeBackgroundWakeWord()
+                        onFallbackToSystemDialog?.invoke()
+                        return
                     }
-                } else {
                     _uiState.value = _uiState.value.copy(
                         isListening = false,
                         rmsLevel = 0f,
@@ -294,17 +311,9 @@ class ZeeVoiceInputController(
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, targetLocale)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, targetLocale)
-            putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("bn-BD", "en-US", "bn-IN"))
-            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1800L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1400L)
-            if (preferOffline) {
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            }
         }
 
         runCatching {
@@ -317,25 +326,28 @@ class ZeeVoiceInputController(
     }
 
     private fun createBestRecognizer(): SpeechRecognizer? {
+        if (!preferSystemFallbackService) {
+            val preferredPackages = listOf(GOOGLE_RECOGNITION_PKG, GOOGLE_TTS_ASR_PKG, GOOGLE_SPEECH_PKG)
+            val serviceIntent = Intent("android.speech.RecognitionService")
+            val services = runCatching {
+                context.packageManager.queryIntentServices(serviceIntent, 0)
+            }.getOrDefault(emptyList())
+
+            val googleService = preferredPackages.firstNotNullOfOrNull { pkg ->
+                services.firstOrNull { it.serviceInfo?.packageName == pkg }
+            }
+
+            if (googleService != null) {
+                val comp = ComponentName(googleService.serviceInfo.packageName, googleService.serviceInfo.name)
+                val rec = runCatching { SpeechRecognizer.createSpeechRecognizer(context, comp) }.getOrNull()
+                    ?: runCatching { SpeechRecognizer.createSpeechRecognizer(context.applicationContext, comp) }.getOrNull()
+                if (rec != null) return rec
+            }
+        }
+
         val defaultRec = runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
             ?: runCatching { SpeechRecognizer.createSpeechRecognizer(context.applicationContext) }.getOrNull()
         if (defaultRec != null) return defaultRec
-
-        val preferredPackages = listOf("com.google.android.googlequicksearchbox", "com.google.android.as")
-        val serviceIntent = Intent("android.speech.RecognitionService")
-        val services = runCatching {
-            context.packageManager.queryIntentServices(serviceIntent, 0)
-        }.getOrDefault(emptyList())
-
-        val googleService = preferredPackages.firstNotNullOfOrNull { pkg ->
-            services.firstOrNull { it.serviceInfo?.packageName == pkg }
-        }
-
-        if (googleService != null) {
-            val comp = ComponentName(googleService.serviceInfo.packageName, googleService.serviceInfo.name)
-            val rec = runCatching { SpeechRecognizer.createSpeechRecognizer(context, comp) }.getOrNull()
-            if (rec != null) return rec
-        }
 
         return null
     }
