@@ -212,7 +212,7 @@ class StarkSuperpowersEngine(
         model: String,
         presetId: String
     ): List<Pair<String, String>> {
-        if (apiKey.isNotBlank() && !prefsStore.state.value.localFirstPrivacy) {
+        if (apiKey.isNotBlank()) {
             val sysPrompt = """
                 Decompose this chaotic brain-dump into atomic tasks as a pure JSON array of objects:
                 [{"type":"todo|reminder|note|device|calc|draft","detail":"..."}]
