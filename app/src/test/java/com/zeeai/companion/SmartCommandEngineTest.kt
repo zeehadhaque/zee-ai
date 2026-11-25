@@ -5,6 +5,7 @@ import com.zeeai.companion.offline.OfflineConversationalBrain
 import com.zeeai.companion.persona.CompanionPersonaEngine
 import com.zeeai.companion.persona.PersonaType
 import com.zeeai.companion.persona.SupportedLanguage
+import com.zeeai.companion.voice.EdgeNeuralTtsClient
 import com.zeeai.companion.voice.OnlineHumanVoiceCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -128,5 +129,21 @@ class SmartCommandEngineTest {
 
         val rankedPro = GeminiNativeClient.rankProModels(mockDiscovered)
         assertEquals("gemini-2.5-pro", rankedPro.first())
+    }
+
+    @Test
+    fun `edge neural drm token and bengali voice selection match exact v2 spec`() {
+        assertEquals(
+            "2CD23A2CA0B2595A-F3C846C370E05F9CC83ACC5F995C5F5D87A4D0F14CE8936A0F902E64099E38A2",
+            EdgeNeuralTtsClient.generateSecMsGecV2(1700000000L)
+        )
+        assertEquals(
+            "EAB92FBD85843FA2-5F6EC34CD63C18607475B4169F1F4CB74AC6381E842EEFF7E953D9D0AB990751",
+            EdgeNeuralTtsClient.generateSecMsGecV2(1795613949L)
+        )
+        assertEquals("bn-BD-PradeepNeural", EdgeNeuralTtsClient.pickVoiceForText("হ্যালো বস", isFemale = false).voiceName)
+        assertEquals("bn-BD-NabanitaNeural", EdgeNeuralTtsClient.pickVoiceForText("হ্যালো বস", isFemale = true).voiceName)
+        assertEquals("en-US-AndrewMultilingualNeural", EdgeNeuralTtsClient.pickVoiceForText("Hello boss", isFemale = false).voiceName)
+        assertEquals("en-US-AvaMultilingualNeural", EdgeNeuralTtsClient.pickVoiceForText("Hello boss", isFemale = true).voiceName)
     }
 }
