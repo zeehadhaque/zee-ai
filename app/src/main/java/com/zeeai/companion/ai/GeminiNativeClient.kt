@@ -66,6 +66,20 @@ class GeminiNativeClient {
     private val modelCooldownUntilMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val COOLDOWN_DURATION_MS = 10L * 60L * 1000L // ১০ মিনিট
 
+    @Volatile
+    private var lastDiscoveredApiKey: String = ""
+    @Volatile
+    private var lastDiscoveryTimestampMs: Long = 0L
+    @Volatile
+    var cachedBestFlash: String = DEFAULT_FLASH_MODEL
+        private set
+    @Volatile
+    var cachedBestPro: String = DEFAULT_PRO_MODEL
+        private set
+    @Volatile
+    var cachedDiscoveredModels: List<String> = emptyList()
+        private set
+
     fun isModelCoolingDown(model: String): Boolean {
         val until = modelCooldownUntilMs[model] ?: return false
         return System.currentTimeMillis() < until
@@ -75,48 +89,145 @@ class GeminiNativeClient {
         modelCooldownUntilMs[model] = System.currentTimeMillis() + COOLDOWN_DURATION_MS
     }
 
-    companion object {
-        val ALL_KNOWN_GEMINI_MODELS = listOf(
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash-8b"
-        )
-
-        const val DEFAULT_FLASH_MODEL = "gemini-2.0-flash"
-        const val DEFAULT_PRO_MODEL = "gemini-1.5-pro"
-
-        private val NON_CHAT_FRAGMENTS = listOf(
-            "embedding", "imagen", "veo", "aqa", "tts", "-image", "image-preview",
-            "robotics", "computer-use", "thinking-exp"
-        )
-
-        fun isValidChatModel(id: String): Boolean {
-            val lower = id.lowercase()
-            if (NON_CHAT_FRAGMENTS.any { lower.contains(it) }) return false
-            if (lower.contains("-exp")) return false
-            return lower.startsWith("gemini-") || lower.startsWith("gemma-")
+    fun primeDiscoveredModels(
+        apiKey: String,
+        models: List<String>,
+        bestFlash: String?,
+        bestPro: String?
+    ) {
+        val cleanKey = apiKey.trim()
+        val valid = models.map { it.removePrefix("models/").trim() }
+            .filter { isValidChatModel(it) }
+            .distinct()
+        if (cleanKey.isNotBlank() && valid.isNotEmpty()) {
+            lastDiscoveredApiKey = cleanKey
+            cachedDiscoveredModels = valid
+            cachedBestFlash = bestFlash?.removePrefix("models/")?.trim()
+                ?.takeIf { isValidChatModel(it) } ?: rankFlashModels(valid).firstOrNull() ?: DEFAULT_FLASH_MODEL
+            cachedBestPro = bestPro?.removePrefix("models/")?.trim()
+                ?.takeIf { isValidChatModel(it) } ?: rankProModels(valid).firstOrNull() ?: DEFAULT_PRO_MODEL
         }
     }
 
-    // Ordered guaranteed-active Flash models FIRST (Free-Tier & High Quota)
+    fun clearDiscoveryCache() {
+        lastDiscoveredApiKey = ""
+        lastDiscoveryTimestampMs = 0L
+        cachedDiscoveredModels = emptyList()
+        cachedBestFlash = DEFAULT_FLASH_MODEL
+        cachedBestPro = DEFAULT_PRO_MODEL
+        modelCooldownUntilMs.clear()
+    }
+
+    companion object {
+        val ALL_KNOWN_GEMINI_MODELS = listOf(
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash"
+        )
+
+        const val DEFAULT_FLASH_MODEL = "gemini-2.5-flash"
+        const val DEFAULT_PRO_MODEL = "gemini-2.5-pro"
+
+        private val NON_CHAT_FRAGMENTS = listOf(
+            "embedding", "imagen", "veo", "aqa", "tts", "-image", "image-preview",
+            "robotics", "computer-use", "thinking-exp", "native-audio", "-audio",
+            "live", "customtools", "gemini-1.0", "gemini-1.5"
+        )
+
+        private val VERSION_REGEX = Regex("gemini-(\\d+)(?:\\.(\\d+))?")
+        private val SNAPSHOT_DATE_SUFFIX = Regex("-(?:\\d{3}|\\d{2}-\\d{2})$")
+
+        fun isValidChatModel(id: String): Boolean {
+            val clean = id.removePrefix("models/").trim()
+            val lower = clean.lowercase()
+            if (lower.isBlank()) return false
+            if (NON_CHAT_FRAGMENTS.any { lower.contains(it) }) return false
+            if (lower.contains("-exp")) return false
+            return lower.startsWith("gemini-")
+        }
+
+        private fun modelRankScore(id: String): Int {
+            val lower = id.removePrefix("models/").trim().lowercase()
+            val m = VERSION_REGEX.find(lower)
+            val versionScore = if (m != null) {
+                val major = m.groupValues[1].toIntOrNull() ?: 0
+                val minor = m.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
+                major * 100 + minor
+            } else if (lower.endsWith("-latest")) {
+                249
+            } else {
+                100
+            }
+            val isPreview = lower.contains("preview")
+            val isLite = lower.contains("lite")
+            val isSnapshot = SNAPSHOT_DATE_SUFFIX.containsMatchIn(lower)
+            var score = versionScore * 100
+            if (!isPreview) score += 40
+            if (!isLite) score += 20
+            if (!isSnapshot) score += 10
+            return score
+        }
+
+        fun rankFlashModels(ids: List<String>): List<String> {
+            val valid = ids.map { it.removePrefix("models/").trim() }
+                .filter { isValidChatModel(it) }
+                .distinct()
+            val flashOnly = valid.filter { it.contains("flash", ignoreCase = true) }
+                .sortedByDescending { modelRankScore(it) }
+            val fallback = valid.filterNot { it.contains("flash", ignoreCase = true) }
+                .sortedByDescending { modelRankScore(it) }
+            return flashOnly + fallback
+        }
+
+        fun rankProModels(ids: List<String>): List<String> {
+            val valid = ids.map { it.removePrefix("models/").trim() }
+                .filter { isValidChatModel(it) }
+                .distinct()
+            val proOnly = valid.filter {
+                it.contains("pro", ignoreCase = true) || it.contains("ultra", ignoreCase = true)
+            }.sortedByDescending { modelRankScore(it) }
+            val fallback = valid.filterNot {
+                it.contains("pro", ignoreCase = true) || it.contains("ultra", ignoreCase = true)
+            }.sortedByDescending { modelRankScore(it) }
+            return proOnly + fallback
+        }
+    }
+
+    // Modern active fallback chain when key discovery isn't cached yet
     private val standardFlashPriority = listOf(
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash-8b"
+        "gemini-2.5-pro"
     )
 
     private val standardProPriority = listOf(
-        "gemini-1.5-pro",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash"
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash"
     )
 
     fun cancelActive() {
         activeCall?.cancel()
         activeCall = null
+    }
+
+    suspend fun ensureModelsDiscovered(
+        apiKey: String,
+        forceRefresh: Boolean = false
+    ): ModelDiscoveryResult? {
+        val cleanKey = apiKey.trim()
+        if (cleanKey.isBlank()) return null
+        val freshEnough = (System.currentTimeMillis() - lastDiscoveryTimestampMs) < 30L * 60L * 1000L
+        if (!forceRefresh && cleanKey == lastDiscoveredApiKey && cachedDiscoveredModels.isNotEmpty() && freshEnough) {
+            return ModelDiscoveryResult(
+                models = cachedDiscoveredModels.map { DiscoveredModel(it, it, "", listOf("generateContent")) },
+                bestFlashModel = cachedBestFlash,
+                bestProModel = cachedBestPro
+            )
+        }
+        return discoverModels(cleanKey).getOrNull()
     }
 
     suspend fun discoverModels(apiKey: String): Result<ModelDiscoveryResult> = withContext(Dispatchers.IO) {
@@ -147,7 +258,7 @@ class GeminiNativeClient {
                 val root = JSONObject(jsonBody)
                 val modelsArray = root.optJSONArray("models") ?: JSONArray()
 
-                val discoveredList = mutableListOf<DiscoveredModel>()
+                val rawDiscovered = mutableListOf<DiscoveredModel>()
                 for (i in 0 until modelsArray.length()) {
                     val mObj = modelsArray.optJSONObject(i) ?: continue
                     val rawName = mObj.optString("name", "")
@@ -163,44 +274,69 @@ class GeminiNativeClient {
                     }
 
                     if (methods.contains("generateContent") && isValidChatModel(id)) {
-                        discoveredList.add(DiscoveredModel(id, displayName, description, methods))
+                        rawDiscovered.add(DiscoveredModel(id, displayName, description, methods))
                     }
                 }
 
-                if (discoveredList.isEmpty()) {
+                if (rawDiscovered.isEmpty()) {
                     return@withContext Result.failure(IllegalStateException("No content generation models found for this API key."))
                 }
 
-                // Prioritize user's requested models: gemini-3.8-flash for Fast and gemini-4-neon for Pro
-                val flashCandidates = discoveredList.filter { it.id.contains("flash", ignoreCase = true) }
-                val bestFlash = flashCandidates.firstOrNull { it.id == "gemini-3.8-flash" }?.id
-                    ?: flashCandidates.firstOrNull { it.id.contains("3.8-flash", ignoreCase = true) }?.id
-                    ?: flashCandidates.firstOrNull { it.id.contains("2.5-flash", ignoreCase = true) }?.id
-                    ?: flashCandidates.firstOrNull { it.id == "gemini-2.0-flash" }?.id
-                    ?: flashCandidates.firstOrNull { it.id == "gemini-1.5-flash" }?.id
-                    ?: flashCandidates.firstOrNull { it.id.contains("2.0-flash", ignoreCase = true) && !it.id.contains("lite") }?.id
-                    ?: flashCandidates.firstOrNull { it.id.contains("1.5-flash", ignoreCase = true) && !it.id.contains("8b") }?.id
-                    ?: flashCandidates.firstOrNull { it.id.contains("2.0-flash-lite", ignoreCase = true) }?.id
-                    ?: flashCandidates.firstOrNull { it.id.contains("flash", ignoreCase = true) }?.id
-                    ?: flashCandidates.firstOrNull()?.id
-                    ?: DEFAULT_FLASH_MODEL
+                val rankedFlashIds = rankFlashModels(rawDiscovered.map { it.id })
+                val rankedProIds = rankProModels(rawDiscovered.map { it.id })
+                val bestFlash = rankedFlashIds.firstOrNull() ?: DEFAULT_FLASH_MODEL
+                val bestPro = rankedProIds.firstOrNull() ?: bestFlash
 
-                val proCandidates = discoveredList.filter { it.id.contains("pro", ignoreCase = true) || it.id.contains("neon", ignoreCase = true) || it.id.contains("thinking", ignoreCase = true) || it.id.contains("neo", ignoreCase = true) }
-                val bestPro = discoveredList.firstOrNull { it.id == "gemini-4-neon" }?.id
-                    ?: discoveredList.firstOrNull { it.id.contains("4-neon", ignoreCase = true) || it.id.contains("neo-4", ignoreCase = true) }?.id
-                    ?: discoveredList.firstOrNull { it.id.contains("3.8-pro", ignoreCase = true) }?.id
-                    ?: proCandidates.firstOrNull { it.id.contains("2.5-pro", ignoreCase = true) }?.id
-                    ?: proCandidates.firstOrNull { it.id.contains("2.0-pro", ignoreCase = true) }?.id
-                    ?: proCandidates.firstOrNull { it.id.contains("1.5-pro", ignoreCase = true) }?.id
-                    ?: proCandidates.firstOrNull { it.id.contains("thinking", ignoreCase = true) }?.id
-                    ?: proCandidates.firstOrNull()?.id
-                    ?: DEFAULT_PRO_MODEL
+                val orderedIds = (listOf(bestFlash, bestPro) + rankedFlashIds + rankedProIds).distinct()
+                val byId = rawDiscovered.associateBy { it.id }
+                val sortedModels = orderedIds.mapNotNull { byId[it] }
 
-                Result.success(ModelDiscoveryResult(discoveredList, bestFlash, bestPro))
+                lastDiscoveredApiKey = cleanKey
+                lastDiscoveryTimestampMs = System.currentTimeMillis()
+                cachedBestFlash = bestFlash
+                cachedBestPro = bestPro
+                cachedDiscoveredModels = orderedIds
+
+                Result.success(ModelDiscoveryResult(sortedModels, bestFlash, bestPro))
             }
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private suspend fun buildCandidateModels(
+        apiKey: String,
+        requestedModel: String,
+        preferPro: Boolean = false
+    ): List<String> {
+        val cleanKey = apiKey.trim()
+        val discovery = if (cleanKey.isNotBlank()) ensureModelsDiscovered(cleanKey) else null
+        val liveList = discovery?.models?.map { it.id } ?: cachedDiscoveredModels
+
+        val cleanReq = requestedModel.removePrefix("models/").trim()
+        val modelsToTry = mutableListOf<String>()
+
+        if (isValidChatModel(cleanReq) && (liveList.isEmpty() || liveList.contains(cleanReq))) {
+            modelsToTry.add(cleanReq)
+        }
+
+        val livePreferred = if (preferPro) cachedBestPro else cachedBestFlash
+        if (isValidChatModel(livePreferred) && !modelsToTry.contains(livePreferred)) {
+            modelsToTry.add(livePreferred)
+        }
+
+        val rankedLive = if (preferPro) rankProModels(liveList) else rankFlashModels(liveList)
+        for (m in rankedLive) {
+            if (!modelsToTry.contains(m)) modelsToTry.add(m)
+        }
+
+        val fallbackList = if (preferPro) standardProPriority else standardFlashPriority
+        for (m in fallbackList) {
+            if (!modelsToTry.contains(m)) modelsToTry.add(m)
+        }
+
+        val nonCooling = modelsToTry.filter { !isModelCoolingDown(it) }
+        return if (nonCooling.isNotEmpty()) nonCooling else modelsToTry
     }
 
     suspend fun testAiConnection(
@@ -211,16 +347,14 @@ class GeminiNativeClient {
     ): String = withContext(Dispatchers.IO) {
         val cleanKey = geminiKey.trim()
         if (cleanKey.isNotBlank()) {
-            val cleanSelected = selectedModel.removePrefix("models/").trim()
-            val candidateTestModels = mutableListOf<String>()
-            if (cleanSelected.isNotBlank() && !cleanSelected.contains("-exp") && cleanSelected != "gemini-exp-1206") {
-                candidateTestModels.add(cleanSelected)
-            }
-            listOf("gemini-3.8-flash", "gemini-4-neon", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash").forEach {
-                if (!candidateTestModels.contains(it)) candidateTestModels.add(it)
-            }
+            val discovery = ensureModelsDiscovered(cleanKey, forceRefresh = true)
+            val candidateTestModels = buildCandidateModels(
+                apiKey = cleanKey,
+                requestedModel = selectedModel.ifBlank { discovery?.bestFlashModel ?: "" },
+                preferPro = false
+            )
             var lastErr = ""
-            for (testModel in candidateTestModels) {
+            for (testModel in candidateTestModels.take(6)) {
                 val testUrl = "https://generativelanguage.googleapis.com/v1beta/models/$testModel:generateContent?key=$cleanKey"
                 val testBody = JSONObject().apply {
                     put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "hi")))))
@@ -235,11 +369,14 @@ class GeminiNativeClient {
                         .build()
                     client.newCall(req).execute().use { resp ->
                         if (resp.isSuccessful) {
-                            val autoNotice = if (cleanSelected.isNotBlank() && cleanSelected != testModel) " (Switched to Active: $testModel)" else ""
+                            val cleanSelected = selectedModel.removePrefix("models/").trim()
+                            val autoNotice = if (cleanSelected.isNotBlank() && cleanSelected != testModel) " (Auto-Selected: $testModel)" else ""
                             return@withContext "✅ Gemini Connected$autoNotice: $testModel (Online & Ready)"
                         } else if (resp.code == 429) {
+                            markModelCooldown(testModel)
                             lastErr = "⚠️ Gemini Quota Exhausted (429) on $testModel"
                         } else {
+                            if (resp.code == 404 || resp.code == 400) markModelCooldown(testModel)
                             val body = resp.body?.string().orEmpty().take(120)
                             lastErr = "HTTP ${resp.code} on $testModel: $body"
                         }
@@ -435,24 +572,11 @@ class GeminiNativeClient {
             return@withContext Result.failure(IllegalStateException("No AI API key configured in Settings."))
         }
 
-        // Sanitize requested model name (remove prefix, handle deprecated models)
-        val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206") {
-            DEFAULT_FLASH_MODEL
-        } else {
-            cleanRequested
-        }
-
-        // Build fallback list starting with requested model then standard Flash cascade
-        val modelsToTry = mutableListOf<String>()
-        modelsToTry.add(primary)
-        for (m in standardFlashPriority) {
-            if (!modelsToTry.contains(m)) modelsToTry.add(m)
-        }
-
-        // 10-Minute Failed-Model Cooldown: Skip rate-limited / dead models
-        val activeCandidates = modelsToTry.filter { !isModelCoolingDown(it) }
-        val finalModelsToTry = if (activeCandidates.isNotEmpty()) activeCandidates else modelsToTry
+        val finalModelsToTry = buildCandidateModels(
+            apiKey = apiKey,
+            requestedModel = model,
+            preferPro = model.contains("pro", ignoreCase = true)
+        )
 
         var lastError: Throwable? = null
 
@@ -473,7 +597,9 @@ class GeminiNativeClient {
                 val err = res.exceptionOrNull()
                 lastError = err
                 val msg = err?.message.orEmpty()
-                if (msg.contains("429") || msg.contains("404") || msg.contains("RESOURCE_EXHAUSTED") || msg.contains("NOT_FOUND")) {
+                if (msg.contains("429") || msg.contains("404") || msg.contains("400") ||
+                    msg.contains("RESOURCE_EXHAUSTED") || msg.contains("NOT_FOUND")
+                ) {
                     markModelCooldown(candidateModel)
                 }
                 val isFatalAuth = msg.contains("API_KEY_INVALID") || msg.contains("API key not valid") ||
@@ -697,18 +823,11 @@ class GeminiNativeClient {
             return@withContext Result.failure(IllegalStateException("Gemini API key not set in Settings."))
         }
 
-        val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206") {
-            DEFAULT_FLASH_MODEL
-        } else {
-            cleanRequested
-        }
-
-        val modelsToTry = mutableListOf<String>()
-        modelsToTry.add(primary)
-        for (m in standardFlashPriority) {
-            if (!modelsToTry.contains(m)) modelsToTry.add(m)
-        }
+        val modelsToTry = buildCandidateModels(
+            apiKey = apiKey,
+            requestedModel = model,
+            preferPro = model.contains("pro", ignoreCase = true)
+        )
 
         for (candidateModel in modelsToTry) {
             val groundedRes = streamGroundedSingleAttempt(
@@ -723,6 +842,11 @@ class GeminiNativeClient {
             }
             val err = groundedRes.exceptionOrNull()
             val msg = err?.message.orEmpty()
+            if (msg.contains("429") || msg.contains("404") || msg.contains("400") ||
+                msg.contains("RESOURCE_EXHAUSTED") || msg.contains("NOT_FOUND")
+            ) {
+                markModelCooldown(candidateModel)
+            }
             val isFatalAuth = msg.contains("API_KEY_INVALID") || msg.contains("API key not valid") ||
                     msg.contains("PERMISSION_DENIED") || msg.contains("HTTP 403") || msg.contains("HTTP 401")
             if (isFatalAuth) {
@@ -734,7 +858,7 @@ class GeminiNativeClient {
         var ungroundedText = ""
         val ungroundedRes = streamChat(
             apiKey = apiKey,
-            model = DEFAULT_FLASH_MODEL,
+            model = cachedBestFlash,
             systemInstruction = systemInstruction,
             history = emptyList(),
             userPrompt = userPrompt,
@@ -888,23 +1012,22 @@ class GeminiNativeClient {
         temperature: Double = 0.7,
         backupGroqKey: String = ""
     ): Result<String> = withContext(Dispatchers.IO) {
-        val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206") {
-            DEFAULT_FLASH_MODEL
-        } else {
-            cleanRequested
-        }
-        val modelsToTry = mutableListOf<String>()
-        modelsToTry.add(primary)
-        for (m in standardFlashPriority) {
-            if (!modelsToTry.contains(m)) modelsToTry.add(m)
-        }
+        val modelsToTry = buildCandidateModels(
+            apiKey = apiKey,
+            requestedModel = model,
+            preferPro = model.contains("pro", ignoreCase = true)
+        )
 
         if (apiKey.isNotBlank()) {
             for (candidate in modelsToTry) {
                 val res = generateOnceSingleAttempt(apiKey, candidate, systemInstruction, userPrompt, temperature)
                 if (res.isSuccess) return@withContext res
                 val msg = res.exceptionOrNull()?.message.orEmpty()
+                if (msg.contains("429") || msg.contains("404") || msg.contains("400") ||
+                    msg.contains("RESOURCE_EXHAUSTED") || msg.contains("NOT_FOUND")
+                ) {
+                    markModelCooldown(candidate)
+                }
                 val isFatalAuth = msg.contains("API_KEY_INVALID") || msg.contains("API key not valid") ||
                         msg.contains("PERMISSION_DENIED") || msg.contains("HTTP 403") || msg.contains("HTTP 401")
                 if (isFatalAuth) {
@@ -1091,17 +1214,11 @@ class GeminiNativeClient {
             put("generationConfig", JSONObject().put("temperature", 0.4))
         }
 
-        val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206") {
-            DEFAULT_FLASH_MODEL
-        } else {
-            cleanRequested
-        }
-        val modelsToTry = mutableListOf<String>()
-        modelsToTry.add(primary)
-        for (m in standardFlashPriority) {
-            if (!modelsToTry.contains(m)) modelsToTry.add(m)
-        }
+        val modelsToTry = buildCandidateModels(
+            apiKey = apiKey,
+            requestedModel = model,
+            preferPro = model.contains("pro", ignoreCase = true)
+        )
 
         for (candidateModel in modelsToTry) {
             val targetModel = candidateModel.removePrefix("models/").trim()
