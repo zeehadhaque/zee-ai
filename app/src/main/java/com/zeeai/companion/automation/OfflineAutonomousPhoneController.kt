@@ -66,12 +66,12 @@ class OfflineAutonomousPhoneController(
                 "YT_SEARCH" -> {
                     val outcome = nativeCommander.tryHandleCommand("youtube play $arg")
                     if (outcome is PhoneCommandOutcome.Executed) OfflineToolOutcome(true, true, outcome.replyText)
-                    else OfflineToolOutcome(true, false, "YouTube open kora jayni.")
+                    else OfflineToolOutcome(true, false, "ইউটিউব খোলা যায়নি বস।")
                 }
                 "GOOGLE_SEARCH" -> {
                     val outcome = nativeCommander.tryHandleCommand("google $arg")
                     if (outcome is PhoneCommandOutcome.Executed) OfflineToolOutcome(true, true, outcome.replyText)
-                    else OfflineToolOutcome(true, false, "Google search open kora jayni.")
+                    else OfflineToolOutcome(true, false, "গুগল সার্চ খোলা যায়নি বস।")
                 }
                 "SEARCH_IN_APP" -> sendCrossProcessAccessibility("SEARCH_IN_APP", arg)
                 "TYPE_AND_SEND" -> sendCrossProcessAccessibility("TYPE_AND_SEND", arg)
