@@ -61,7 +61,7 @@ android {
     buildTypes {
         getByName("release") {
             isDebuggable = false
-            // MediaPipe JNI ও Compose reflection 100% crash-free রাখতে minify false রাখা হলো
+            // Compose reflection crash-free রাখতে minify false রাখা হলো
             isMinifyEnabled = false
             isShrinkResources = false
             if (hasReleaseKeystore) {
@@ -130,9 +130,6 @@ dependencies {
 
     // Native Google OAuth 2.0 AuthorizationClient (YouTube Data & Analytics APIs)
     implementation("com.google.android.gms:play-services-auth:21.2.0")
-
-    // On-Device Offline LLM Inference (Downloaded dynamically — zero APK bloat)
-    implementation("com.google.mediapipe:tasks-genai:0.10.27")
 
     // Unit Tests
     testImplementation("junit:junit:4.13.2")
