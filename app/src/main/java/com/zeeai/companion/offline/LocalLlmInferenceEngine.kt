@@ -8,6 +8,7 @@ import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -109,6 +110,16 @@ class LocalLlmInferenceEngine(
     suspend fun ensureLoaded(modelPath: String): Result<String> = ensureModelLoaded(modelPath)
 
     /**
+     * Background Pre-Warm: App open বা Offline toggle হওয়ার সাথে সাথে ব্যাকগ্রাউন্ডে মডেল লোড করে রাখা
+     */
+    fun prewarmModel(modelPath: String?) {
+        if (modelPath.isNullOrBlank()) return
+        CoroutineScope(llmDispatcher).launch {
+            runCatching { ensureModelLoaded(modelPath) }
+        }
+    }
+
+    /**
      * Native Crash Guard সহ নিরাপদ মডেল লোডার
      */
     suspend fun ensureModelLoaded(modelPath: String): Result<String> = withContext(llmDispatcher) {
@@ -139,9 +150,9 @@ class LocalLlmInferenceEngine(
 
             closeInternal()
 
-            // ১. ফোর্স CPU লক করা থাকলে বা ফোনে ফ্রি RAM কম থাকলে সরাসরি CPU-তে লোড করো
-            val forceCpu = prefs.getBoolean(KEY_FORCE_CPU_PREFIX + file.name, false) ||
-                availRamMb < (modelSizeMb + 900L)
+            // ১. ফোর্স CPU লক করা থাকলে (আগেরবার ক্র্যাশ সেনটিনেল ট্রিগার হলে) CPU-তে লোড করো
+            // অন্যথায় ১২জিবি ফোনে সম্পূর্ণ GPU প্রাধান্য দেওয়া হবে (Xiaomi misreported RAM অগ্রাহ্য করে)
+            val forceCpu = prefs.getBoolean(KEY_FORCE_CPU_PREFIX + file.name, false)
 
             val backendsToTry = if (forceCpu) {
                 listOf(LlmInference.Backend.CPU)
@@ -232,12 +243,24 @@ class LocalLlmInferenceEngine(
                     withTimeout(GENERATION_TIMEOUT_MS) {
                         LlmInferenceSession.createFromOptions(engine, sessionOptions).use { session ->
                             session.addQueryChunk(prompt)
+                            var lastEmitTime = 0L
                             session.generateResponseAsync { partial, done ->
                                 if (!partial.isNullOrEmpty()) {
                                     output.append(partial)
-                                    onPartialResult(output.toString())
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastEmitTime >= 45L || done) {
+                                        lastEmitTime = now
+                                        val snapshot = output.toString()
+                                        CoroutineScope(Dispatchers.Main).launch {
+                                            onPartialResult(snapshot)
+                                        }
+                                    }
                                 }
                                 if (done && !doneSignal.isCompleted) {
+                                    val finalSnapshot = output.toString()
+                                    CoroutineScope(Dispatchers.Main).launch {
+                                        onPartialResult(finalSnapshot)
+                                    }
                                     doneSignal.complete(Unit)
                                 }
                             }
