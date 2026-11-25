@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -24,18 +25,30 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.zeeai.companion.MainActivity
+import com.zeeai.companion.ai.ActiveEngineRoute
+import com.zeeai.companion.ai.BestFriendPersona
+import com.zeeai.companion.ai.GeminiNativeClient
+import com.zeeai.companion.ai.RouterConfig
+import com.zeeai.companion.ai.UnifiedCommandAndChatRouter
 import com.zeeai.companion.automation.NativePhoneCommander
+import com.zeeai.companion.automation.OfflineAutonomousPhoneController
 import com.zeeai.companion.automation.PhoneCommandOutcome
 import com.zeeai.companion.data.local.SecureKeyVault
+import com.zeeai.companion.jarvis.JarvisPreferences
 import com.zeeai.companion.offline.OfflineConversationalBrain
+import com.zeeai.companion.offline.PersonalOfflineMemoryVault
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.lang.ref.WeakReference
-import java.util.Locale
 
 data class WakeWordDetection(
     val targetCharacterId: String, // "zee" or "zhee"
@@ -49,6 +62,9 @@ object WakeWordEventBus {
 
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
+
+    private val _isHandsFreeSessionDesired = MutableStateFlow(false)
+    val isHandsFreeSessionDesired: StateFlow<Boolean> = _isHandsFreeSessionDesired.asStateFlow()
 
     @Volatile
     var isPausedForActiveVoice: Boolean = false
@@ -64,6 +80,10 @@ object WakeWordEventBus {
         isPausedForActiveVoice = paused
     }
 
+    fun setPhoneMicSessionDesired(active: Boolean) {
+        _isHandsFreeSessionDesired.value = active
+    }
+
     internal fun emitDetection(detection: WakeWordDetection) {
         _detections.tryEmit(detection)
     }
@@ -72,15 +92,29 @@ object WakeWordEventBus {
 class WakeWordForegroundService : Service() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var speechRecognizer: SpeechRecognizer? = null
     private var isStopping = false
     private var lastTriggerTimeMs = 0L
 
     private var phoneCommander: NativePhoneCommander? = null
+    private var offlinePhoneController: OfflineAutonomousPhoneController? = null
+    private var geminiClient: GeminiNativeClient? = null
+    private var router: UnifiedCommandAndChatRouter? = null
     private var keyVault: SecureKeyVault? = null
+    private var jarvisPrefs: JarvisPreferences? = null
     private var onlineVoiceEngine: HumanVoiceEngine? = null
+
     @Volatile
     private var isTtsSpeaking = false
+    @Volatile
+    private var handsFreeDirectMode = false
+    @Volatile
+    private var handsFreeFemalePersona = false
+    @Volatile
+    private var forceEnglishFallback = false
+    @Volatile
+    private var preferSystemFallback = false
 
     private val restartRunnable = Runnable {
         if (!isStopping && !WakeWordEventBus.isPausedForActiveVoice && !isTtsSpeaking) {
@@ -92,18 +126,27 @@ class WakeWordForegroundService : Service() {
         super.onCreate()
         WakeWordEventBus.activeServiceRef = WeakReference(this)
         createNotificationChannel()
+        val vault = runCatching { SecureKeyVault(applicationContext) }.getOrNull()
+        val memVault = PersonalOfflineMemoryVault(applicationContext)
+        val offlineCtrl = OfflineAutonomousPhoneController(applicationContext, memVault)
+        val gemini = GeminiNativeClient()
+
+        keyVault = vault
+        jarvisPrefs = JarvisPreferences(applicationContext)
         phoneCommander = NativePhoneCommander(applicationContext)
-        keyVault = runCatching { SecureKeyVault(applicationContext) }.getOrNull()
+        offlinePhoneController = offlineCtrl
+        geminiClient = gemini
+        router = UnifiedCommandAndChatRouter(applicationContext, offlineCtrl, gemini)
 
         onlineVoiceEngine = HumanVoiceEngine(
             context = applicationContext,
             onSpeechStart = {
                 isTtsSpeaking = true
-                mainHandler.post { speechRecognizer?.cancel() }
+                mainHandler.post { destroyRecognizer() }
             },
             onSpeechDone = {
                 isTtsSpeaking = false
-                scheduleRestart(250L)
+                scheduleRestart(350L)
             }
         )
     }
@@ -122,8 +165,9 @@ class WakeWordForegroundService : Service() {
         mainHandler.post { stopWakeWordService() }
     }
 
-    private fun speakReply(text: String, isFemale: Boolean = false) {
-        if (text.isBlank()) return
+    private fun speakReply(text: String, isFemale: Boolean = handsFreeFemalePersona) {
+        val clean = text.removePrefix("⚠️").trim()
+        if (clean.isBlank()) return
         val vault = keyVault
         val geminiKey = vault?.getKey("gemini_api_key").orEmpty()
         val elevenKey = vault?.getKey("elevenlabs_api_key").orEmpty()
@@ -131,7 +175,7 @@ class WakeWordForegroundService : Service() {
             onlineVoiceEngine?.updateVoiceConfig(OnlineHumanVoiceCatalog.loadConfig(it))
         }
         onlineVoiceEngine?.speakHuman(
-            rawText = text,
+            rawText = clean,
             persona = if (isFemale) VoicePersona.ZHEE_FEMALE else VoicePersona.ZEE_MALE,
             isOnline = isNetworkAvailable(),
             geminiApiKey = geminiKey,
@@ -145,7 +189,26 @@ class WakeWordForegroundService : Service() {
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
 
-        val notification = buildNotification("Listening 24/7 for \"Hey Zee\", \"Zee\", or phone commands")
+        val isHandsFreeIntent = intent?.action == ACTION_START_HANDS_FREE
+        if (isHandsFreeIntent) {
+            handsFreeDirectMode = true
+            handsFreeFemalePersona = intent?.getBooleanExtra(EXTRA_FEMALE_PERSONA, false) == true
+        } else if (intent?.action == ACTION_START) {
+            handsFreeDirectMode = false
+        }
+
+        val notifTitle = if (handsFreeDirectMode) {
+            "ZEE Hands-Free Mic ON"
+        } else {
+            "ZEE AI Always-On Active"
+        }
+        val notifBody = if (handsFreeDirectMode) {
+            "All voice commands live across YouTube, Google, WhatsApp, Scroll..."
+        } else {
+            "Listening 24/7 for \"Hey Zee\" or direct phone commands"
+        }
+
+        val notification = buildNotification(notifTitle, notifBody)
         val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         } else {
@@ -164,6 +227,7 @@ class WakeWordForegroundService : Service() {
 
         when (intent?.action) {
             ACTION_STOP -> {
+                WakeWordEventBus.setPhoneMicSessionDesired(false)
                 stopWakeWordService()
                 return START_NOT_STICKY
             }
@@ -174,7 +238,7 @@ class WakeWordForegroundService : Service() {
             }
             ACTION_RESUME -> {
                 WakeWordEventBus.setPaused(false)
-                scheduleRestart(400L)
+                scheduleRestart(350L)
                 return START_STICKY
             }
         }
@@ -182,8 +246,32 @@ class WakeWordForegroundService : Service() {
         isStopping = false
         WakeWordEventBus.setPaused(false)
         WakeWordEventBus.setRunning(true)
-        mainHandler.post { startListeningCycle() }
+        if (isHandsFreeIntent) {
+            // Brief delay lets confirmation speech from foreground Activity finish cleanly before across-app mic listens
+            scheduleRestart(1400L)
+        } else {
+            mainHandler.post { startListeningCycle() }
+        }
         return START_STICKY
+    }
+
+    private fun createBestRecognizer(): SpeechRecognizer? {
+        if (!preferSystemFallback) {
+            val preferred = listOf("com.google.android.googlequicksearchbox", "com.google.android.as", "com.google.android.tts")
+            val services = runCatching {
+                packageManager.queryIntentServices(Intent("android.speech.RecognitionService"), 0)
+            }.getOrDefault(emptyList())
+            val googleService = preferred.firstNotNullOfOrNull { pkg ->
+                services.firstOrNull { it.serviceInfo?.packageName == pkg }
+            }
+            if (googleService != null) {
+                val comp = ComponentName(googleService.serviceInfo.packageName, googleService.serviceInfo.name)
+                val rec = runCatching { SpeechRecognizer.createSpeechRecognizer(applicationContext, comp) }.getOrNull()
+                if (rec != null) return rec
+            }
+        }
+        return runCatching { SpeechRecognizer.createSpeechRecognizer(applicationContext) }.getOrNull()
+            ?: runCatching { SpeechRecognizer.createSpeechRecognizer(this) }.getOrNull()
     }
 
     private fun startListeningCycle() {
@@ -191,26 +279,22 @@ class WakeWordForegroundService : Service() {
 
         destroyRecognizer()
 
-        val recognizer = runCatching {
-            SpeechRecognizer.createSpeechRecognizer(applicationContext)
-        }.getOrElse {
-            runCatching { SpeechRecognizer.createSpeechRecognizer(this) }.getOrNull()
-        }
-
+        val recognizer = createBestRecognizer()
         if (recognizer == null) {
-            scheduleRestart(2500L)
+            scheduleRestart(2000L)
             return
         }
 
         recognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
+            override fun onReadyForSpeech(params: Bundle?) = Unit
+            override fun onBeginningOfSpeech() = Unit
+            override fun onRmsChanged(rmsdB: Float) = Unit
+            override fun onBufferReceived(buffer: ByteArray?) = Unit
+            override fun onEndOfSpeech() = Unit
+            override fun onEvent(eventType: Int, params: Bundle?) = Unit
 
             override fun onPartialResults(partialResults: Bundle?) {
+                if (handsFreeDirectMode) return // Wait for complete utterance in direct hands-free mode
                 val text = partialResults
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
@@ -225,22 +309,34 @@ class WakeWordForegroundService : Service() {
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
                     .orEmpty()
+                    .trim()
                 if (text.isNotBlank()) {
-                    checkForWakeWordOrCommand(text, isFinal = true)
+                    if (handsFreeDirectMode) {
+                        executeHandsFreeCommand(text)
+                    } else {
+                        checkForWakeWordOrCommand(text, isFinal = true)
+                    }
                 }
                 scheduleRestart(350L)
             }
 
             override fun onError(error: Int) {
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    stopWakeWordService()
+                    return
+                }
+                if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                    error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+                ) {
+                    forceEnglishFallback = true
+                } else if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_SERVER) {
+                    preferSystemFallback = !preferSystemFallback
+                }
                 val delayMs = when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH,
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 350L
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 800L
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
-                        stopWakeWordService()
-                        return
-                    }
-                    else -> 1200L
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 280L
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 650L
+                    else -> 800L
                 }
                 scheduleRestart(delayMs)
             }
@@ -248,15 +344,70 @@ class WakeWordForegroundService : Service() {
 
         val listenIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "bn-BD")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (forceEnglishFallback) "en-US" else "bn-BD")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
         }
 
         speechRecognizer = recognizer
         runCatching { recognizer.startListening(listenIntent) }
-            .onFailure { scheduleRestart(1200L) }
+            .onFailure { scheduleRestart(900L) }
+    }
+
+    private fun executeHandsFreeCommand(spokenText: String) {
+        val lower = spokenText.lowercase().trim()
+        if (lower in listOf("stop mic", "mic off", "mic bondho", "mic bondho koro", "stop listening", "মাইক বন্ধ", "মাইক বন্ধ করো")) {
+            handsFreeDirectMode = false
+            WakeWordEventBus.setPhoneMicSessionDesired(false)
+            speakReply("মাইক বন্ধ করেছি বস।")
+            mainHandler.postDelayed({ stopWakeWordService() }, 1800L)
+            return
+        }
+
+        val outcome = phoneCommander?.tryHandleCommand(spokenText)
+        if (outcome is PhoneCommandOutcome.Executed) {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIFICATION_ID, buildNotification("ZEE Hands-Free Mic ON", outcome.replyText))
+            speakReply(outcome.replyText)
+            return
+        }
+        if (outcome is PhoneCommandOutcome.NeedsConfirmation) {
+            val confirmReply = runCatching { outcome.confirmation.onConfirm() }
+                .getOrElse { outcome.confirmation.details }
+            speakReply(confirmReply)
+            return
+        }
+
+        val r = router ?: return
+        val vault = keyVault ?: return
+        val prefsSnap = jarvisPrefs?.state?.value
+        val activeModel = vault.getKey("gemini_flash_model").removePrefix("models/").trim()
+            .ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
+
+        serviceScope.launch {
+            val config = RouterConfig(
+                route = ActiveEngineRoute.ONLINE,
+                selectedOnlineModel = activeModel,
+                persona = if (handsFreeFemalePersona) BestFriendPersona.ZHEE else BestFriendPersona.ZEE,
+                geminiApiKey = vault.getKey("gemini_api_key"),
+                groqApiKey = vault.getKey("groq_api_key"),
+                openRouterApiKey = vault.getKey("openrouter_api_key"),
+                customProviderPreset = prefsSnap?.aiProviderPreset ?: "gemini",
+                customBaseUrl = prefsSnap?.aiBaseUrl.orEmpty(),
+                customApiKey = vault.getKey("custom_provider_api_key")
+            )
+            val reply = r.handleUserInput(
+                userText = spokenText,
+                config = config,
+                history = emptyList(),
+                onStreamingText = {}
+            )
+            val spoken = reply.substringBefore("\n\n⚡").trim().ifBlank { reply }
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIFICATION_ID, buildNotification("ZEE Hands-Free Mic ON", spoken.take(90)))
+            speakReply(spoken)
+        }
     }
 
     private fun checkForWakeWordOrCommand(rawTranscript: String, isFinal: Boolean) {
@@ -282,33 +433,31 @@ class WakeWordForegroundService : Service() {
             )
 
             if (trailing.isNotBlank()) {
-                val commander = phoneCommander
-                val outcome = commander?.tryHandleCommand(trailing)
+                val outcome = phoneCommander?.tryHandleCommand(trailing)
                 if (outcome is PhoneCommandOutcome.Executed) {
                     val nm = getSystemService(NotificationManager::class.java)
-                    nm.notify(NOTIFICATION_ID, buildNotification("${targetChar.uppercase()}: ${outcome.replyText}"))
+                    nm.notify(NOTIFICATION_ID, buildNotification("ZEE AI Always-On Active", "${targetChar.uppercase()}: ${outcome.replyText}"))
                     speakReply(outcome.replyText, isFemale = targetChar == "zhee")
                     return
                 } else {
                     val offlineReply = OfflineConversationalBrain.respond(trailing, targetChar)
                     val nm = getSystemService(NotificationManager::class.java)
-                    nm.notify(NOTIFICATION_ID, buildNotification("${targetChar.uppercase()}: $offlineReply"))
+                    nm.notify(NOTIFICATION_ID, buildNotification("ZEE AI Always-On Active", "${targetChar.uppercase()}: $offlineReply"))
                     speakReply(offlineReply, isFemale = targetChar == "zhee")
                     return
                 }
             } else {
                 val greeting = if (targetChar == "zhee") "হ্যাঁ বস, আমি শুনছি।" else "হ্যাঁ বস, বলুন কী করতে হবে?"
                 val nm = getSystemService(NotificationManager::class.java)
-                nm.notify(NOTIFICATION_ID, buildNotification("${targetChar.uppercase()}: $greeting"))
+                nm.notify(NOTIFICATION_ID, buildNotification("ZEE AI Always-On Active", "${targetChar.uppercase()}: $greeting"))
                 speakReply(greeting, isFemale = targetChar == "zhee")
             }
         } else if (isFinal) {
-            val commander = phoneCommander
-            val outcome = commander?.tryHandleCommand(normalized)
+            val outcome = phoneCommander?.tryHandleCommand(normalized)
             if (outcome is PhoneCommandOutcome.Executed) {
                 lastTriggerTimeMs = now
                 val nm = getSystemService(NotificationManager::class.java)
-                nm.notify(NOTIFICATION_ID, buildNotification("Action: ${outcome.replyText}"))
+                nm.notify(NOTIFICATION_ID, buildNotification("ZEE AI Always-On Active", "Action: ${outcome.replyText}"))
                 speakReply(outcome.replyText, isFemale = false)
             }
         }
@@ -332,6 +481,7 @@ class WakeWordForegroundService : Service() {
 
     private fun stopWakeWordService() {
         isStopping = true
+        handsFreeDirectMode = false
         destroyRecognizer()
         WakeWordEventBus.setRunning(false)
         WakeWordEventBus.setPaused(false)
@@ -341,12 +491,14 @@ class WakeWordForegroundService : Service() {
 
     override fun onDestroy() {
         isStopping = true
+        handsFreeDirectMode = false
         WakeWordEventBus.activeServiceRef = null
         destroyRecognizer()
         WakeWordEventBus.setRunning(false)
         WakeWordEventBus.setPaused(false)
         onlineVoiceEngine?.release()
         onlineVoiceEngine = null
+        serviceScope.cancel()
         super.onDestroy()
     }
 
@@ -366,14 +518,14 @@ class WakeWordForegroundService : Service() {
                 "ZEE AI Background Voice Assistant",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "24/7 background listener for voice commands and wake words."
+                description = "Foreground voice control listener across all apps."
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
-    private fun buildNotification(statusLine: String): Notification {
+    private fun buildNotification(title: String, statusLine: String): Notification {
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
         }
@@ -395,12 +547,12 @@ class WakeWordForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("ZEE AI Always-On Active")
+            .setContentTitle(title)
             .setContentText(statusLine)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .setContentIntent(openPending)
-            .addAction(android.R.drawable.ic_media_pause, "Stop", stopPending)
+            .addAction(android.R.drawable.ic_media_pause, "Stop Mic", stopPending)
             .build()
     }
 
@@ -410,9 +562,11 @@ class WakeWordForegroundService : Service() {
         private const val WAKE_COOLDOWN_MS = 2000L
 
         const val ACTION_START = "com.zeeai.companion.WAKE_START"
+        const val ACTION_START_HANDS_FREE = "com.zeeai.companion.HANDS_FREE_START"
         const val ACTION_STOP = "com.zeeai.companion.WAKE_STOP"
         const val ACTION_PAUSE = "com.zeeai.companion.WAKE_PAUSE"
         const val ACTION_RESUME = "com.zeeai.companion.WAKE_RESUME"
+        const val EXTRA_FEMALE_PERSONA = "female_persona"
 
         fun start(context: Context) {
             val hasMic = ContextCompat.checkSelfPermission(
@@ -422,6 +576,20 @@ class WakeWordForegroundService : Service() {
             if (!hasMic) return
             val intent = Intent(context, WakeWordForegroundService::class.java).apply {
                 action = ACTION_START
+            }
+            runCatching { ContextCompat.startForegroundService(context, intent) }
+        }
+
+        fun startHandsFreeControl(context: Context, isFemale: Boolean = false) {
+            val hasMic = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasMic) return
+            WakeWordEventBus.setPaused(false)
+            val intent = Intent(context, WakeWordForegroundService::class.java).apply {
+                action = ACTION_START_HANDS_FREE
+                putExtra(EXTRA_FEMALE_PERSONA, isFemale)
             }
             runCatching { ContextCompat.startForegroundService(context, intent) }
         }
