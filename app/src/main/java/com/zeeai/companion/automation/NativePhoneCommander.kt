@@ -15,6 +15,7 @@ import android.provider.AlarmClock
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.provider.Settings
+import android.view.KeyEvent
 import androidx.core.content.ContextCompat
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
@@ -40,11 +41,16 @@ class NativePhoneCommander(private val context: Context) {
 
     private val knownApps = mapOf(
         "whatsapp" to "com.whatsapp",
+        "wa" to "com.whatsapp",
         "youtube" to "com.google.android.youtube",
+        "yt" to "com.google.android.youtube",
         "facebook" to "com.facebook.katana",
+        "fb" to "com.facebook.katana",
         "messenger" to "com.facebook.orca",
         "instagram" to "com.instagram.android",
+        "insta" to "com.instagram.android",
         "chrome" to "com.android.chrome",
+        "google" to "com.google.android.googlequicksearchbox",
         "calculator" to "com.google.android.calculator",
         "telegram" to "org.telegram.messenger",
         "tiktok" to "com.zhiliaoapp.musically",
@@ -54,7 +60,9 @@ class NativePhoneCommander(private val context: Context) {
         "play store" to "com.android.vending",
         "photos" to "com.google.android.apps.photos",
         "gallery" to "com.google.android.apps.photos",
-        "phone" to "com.google.android.dialer"
+        "phone" to "com.google.android.dialer",
+        "messages" to "com.google.android.apps.messaging",
+        "sms" to "com.google.android.apps.messaging"
     )
 
     fun isTorchActive(): Boolean = isTorchOn
@@ -256,7 +264,86 @@ class NativePhoneCommander(private val context: Context) {
             return PhoneCommandOutcome.Executed(if (ok) "Phone settings open kore diyechi boss." else "Settings khola jayni boss.")
         }
 
-        // 3. Post Story (Facebook / Instagram / Social)
+        // 2c. Media Playback Controls (Works natively on YouTube / Spotify / Reels)
+        if (hasAnyTerm(lower, "skip ad", "skip", "অ্যাড স্কিপ", "স্কিপ")) {
+            val ok = runAccessibilityAction("SKIP_AD") { it.skipAdIfPresent() }
+            if (ok == true) return PhoneCommandOutcome.Executed("Ad skip kore diyechi boss.")
+        }
+        if (hasAnyTerm(lower, "next video", "next reel", "next short", "porer video", "পরের ভিডিও", "arekta")) {
+            val fg = ZeeAccessibilityService.currentForegroundPackage()
+            val handled = if (fg.contains("youtube") || fg.contains("musically") || fg.contains("instagram") || fg.contains("facebook")) {
+                runAccessibilityAction("SCROLL", "DOWN") { it.swipeDirection("DOWN") } ?: false
+            } else {
+                dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
+            }
+            return PhoneCommandOutcome.Executed(if (handled) "Next item play korechi boss." else "Next kora jayni boss.")
+        }
+        if (hasAnyTerm(lower, "previous video", "ager video", "আগের ভিডিও")) {
+            val fg = ZeeAccessibilityService.currentForegroundPackage()
+            val handled = if (fg.contains("youtube") || fg.contains("musically") || fg.contains("instagram") || fg.contains("facebook")) {
+                runAccessibilityAction("SCROLL", "UP") { it.swipeDirection("UP") } ?: false
+            } else {
+                dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            }
+            return PhoneCommandOutcome.Executed(if (handled) "Previous video te gelam boss." else "Previous kora jayni boss.")
+        }
+        if (lower in listOf("pause", "pause video", "stop video", "stop song", "play", "resume", "resume video", "পজ", "থামাও", "প্লে করো")) {
+            val keySent = dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+            val accClicked = ZeeAccessibilityService.getInstance()?.let {
+                it.clickNodeContainingText("pause") || it.clickNodeContainingText("play")
+            } ?: false
+            return PhoneCommandOutcome.Executed(if (keySent || accClicked) "Media play/pause kore diyechi boss." else "Media control kora jayni boss.")
+        }
+
+        // 2d. YouTube Direct Search & Auto-Play ("yt e natok search koro", "youtube play lo-fi", "ইউটিউবে গান চালাও")
+        if (hasAnyTerm(lower, "youtube", "yt", "ইউটিউব", "ইউটিউবে")) {
+            val wantsPlay = hasAnyTerm(lower, "play", "chalao", "bajao", "shonao", "dekhao", "চালাও", "দেখাও", "শোনাও", "বাজাও")
+            val wantsSearch = wantsPlay || hasAnyTerm(lower, "search", "find", "khujo", "khuj", "dekho", "সার্চ", "খোঁজো", "খুঁজো")
+            val ytQuery = text
+                .replace(Regex("""(?i)\b(?:youtube|yt|on|in|for|search|find|play|open|launch|kholo|chalao|bajao|shonao|dekhao|koro|karo|dao)\b"""), " ")
+                .replace(Regex("""(?:^|\s)(?:ইউটিউবে|ইউটিউব|সার্চ|খোঁজো|খুঁজো|চালাও|দেখাও|শোনাও|করো|দাও|একটা|গান|ভিডিও)(?=\s|$)"""), " ")
+                .replace(Regex("""(?i)\b(?:e|te)\b"""), " ")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+
+            if (wantsSearch && ytQuery.isNotBlank()) {
+                val ok = openYouTubeSearch(ytQuery)
+                if (ok && wantsPlay && ZeeAccessibilityService.isServiceEnabled(context)) {
+                    ZeeAccessibilityService.sendControlCommand(context, "YT_PLAY_FIRST", "1900")
+                }
+                return PhoneCommandOutcome.Executed(
+                    if (ok) "YouTube-e '$ytQuery' search kore diyechi boss." else "YouTube open kora jayni boss."
+                )
+            }
+        }
+
+        // 2e. Google Search & Browser URLs ("google weather Dhaka", "google e search koro...", "গুগল করো...")
+        if (hasAnyTerm(lower, "google", "গুগল", "গুগলে")) {
+            val googleQuery = text
+                .replace(Regex("""(?i)\b(?:google|chrome|on|in|for|search|find|open|kholo|koro|karo|dao)\b"""), " ")
+                .replace(Regex("""(?:^|\s)(?:গুগলে|গুগল|ক্রোম|সার্চ|খোঁজো|খুঁজো|করো|খোলো|দাও)(?=\s|$)"""), " ")
+                .replace(Regex("""(?i)\b(?:e|te)\b"""), " ")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+            if (googleQuery.isNotBlank()) {
+                val ok = openGoogleSearch(googleQuery)
+                return PhoneCommandOutcome.Executed(
+                    if (ok) "Google-e '$googleQuery' search kore diyechi boss." else "Browser open kora jayni boss."
+                )
+            }
+        }
+
+        // Direct domain / URL launch ("open facebook.com", "google.com")
+        Regex("""^(?:open|go to|launch|khulo|kholo|খোলো)?\s*([a-zA-Z0-9-]+\.(?:com|org|net|io|bd|in|tv|ai)(?:/\S*)?)$""", RegexOption.IGNORE_CASE).find(text)?.let { m ->
+            val domainUrl = "https://" + m.groupValues[1].trim()
+            val ok = runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(domainUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            }.getOrDefault(false)
+            if (ok) return PhoneCommandOutcome.Executed("${m.groupValues[1]} browser-e khule diyechi boss.")
+        }
+
+        // 3. Post Story OR Feed Post ("facebook e post koro ...", "post ...", "story post")
         if (hasAnyTerm(lower, "story", "স্টোরি") &&
             hasAnyTerm(lower, "post", "dao", "chalu", "koro", "শেয়ার", "দাও", "পোস্ট")
         ) {
@@ -281,98 +368,220 @@ class NativePhoneCommander(private val context: Context) {
             }
         }
 
-        // 4. Autonomous Messaging: WhatsApp
-        if (lower.contains("whatsapp") && hasAnyTerm(lower, "message", "msg", "pathao", "পাঠাও", "bolo", "বল", "পাঠিয়ে", "পাঠিয়ে")) {
-            val digits = Regex("(\\+?\\d{7,15})").find(rawInput)?.groupValues?.get(1)
-            val textToExtract = rawInput
-                .replace(Regex("(?i)(?:whatsapp|message|msg|pathao|bolo|পাঠাও|বল|কে|daao|dao)"), "")
-                .replace(digits ?: "", "")
+        if (hasAnyTerm(lower, "post", "পোস্ট") &&
+            (lower.contains("facebook") || lower.contains("fb") || hasAnyTerm(lower, "koro", "kor", "this", "post", "করো", "পোস্ট"))
+        ) {
+            val postBody = text
+                .replace(Regex("""(?i)\b(?:facebook|fb|on|in|e|te|post|create|make|koro|kor|this|please)\b"""), " ")
+                .replace(Regex("""(?:^|\s)(?:ফেসবুকে|ফেসবুক|পোস্ট|করো|দাও)(?=\s|$)"""), " ")
+                .replace(Regex("""\s+"""), " ")
                 .trim()
 
-            val msgPayload = textToExtract.ifBlank { "Hello!" }
-
-            if (digits != null) {
-                val cleanDigits = digits.replace(Regex("[^0-9]"), "")
-                val encoded = URLEncoder.encode(msgPayload, "UTF-8")
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$cleanDigits?text=$encoded")).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val fg = ZeeAccessibilityService.currentForegroundPackage()
+            return if (lower.contains("facebook") || lower.contains("fb") || fg.isBlank() || fg == context.packageName) {
+                val ok = launchApp("com.facebook.katana")
+                if (ok && ZeeAccessibilityService.isServiceEnabled(context)) {
+                    ZeeAccessibilityService.sendControlCommand(context, "FB_POST", postBody)
                 }
-                context.startActivity(intent)
-                ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "900")
-                return PhoneCommandOutcome.Executed("WhatsApp-e $digits er inbox-e message ready kore diyechi boss.")
+                PhoneCommandOutcome.Executed(
+                    if (ok && postBody.isNotBlank()) "Facebook-e '$postBody' post ready kore diyechi boss."
+                    else if (ok) "Facebook post box open korechi boss."
+                    else "Facebook app pawa jayni boss."
+                )
             } else {
-                val words = lower.split(" ").filter { it !in listOf("whatsapp", "whatsapp-e", "message", "msg", "pathao", "ke", "bolo", "পাঠাও") }
-                val targetName = words.firstOrNull().orEmpty()
-                val phone = if (targetName.isNotBlank()) findContactPhoneNumber(targetName) else null
-
-                if (phone != null) {
-                    val cleanDigits = phone.replace(Regex("[^0-9]"), "")
-                    val encoded = URLEncoder.encode(msgPayload, "UTF-8")
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$cleanDigits?text=$encoded")).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(intent)
-                    ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "900")
-                    return PhoneCommandOutcome.Executed("WhatsApp-e $targetName ($phone) ke message ready kore diyechi boss.")
+                if (postBody.isNotBlank()) {
+                    val ok = runAccessibilityAction("TYPE_AND_POST", postBody) { it.autoTypeAndSend(postBody, isPostOrComment = true) }
+                        ?: return PhoneCommandOutcome.Executed("Post korte Accessibility ON kore dao boss.")
+                    PhoneCommandOutcome.Executed(if (ok) "Post type kore publish korechi boss." else "Active post box pawa jayni boss.")
                 } else {
-                    launchApp("com.whatsapp")
-                    ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "1200")
-                    return PhoneCommandOutcome.Executed("WhatsApp open korechi boss. Contact select korlei send kora jabe.")
+                    runAccessibilityAction("CLICK_POST") { it.autoClickPostAfterDelay(50L); true }
+                        ?: return PhoneCommandOutcome.Executed("Post button click korte Accessibility ON kore dao boss.")
+                    PhoneCommandOutcome.Executed("Post button press kore diyechi boss.")
                 }
             }
         }
 
-        // 5. Autonomous Messaging: Messenger / Facebook
+        // 4. Autonomous Messaging: WhatsApp (Fixed Bangla/Banglish "[Name] ke [message]" extraction)
+        if (lower.contains("whatsapp") || hasAnyTerm(lower, "হোয়াটসঅ্যাপ", "হোয়াটসঅ্যাপ")) {
+            val digits = Regex("(\\+?\\d{7,15})").find(rawInput)?.groupValues?.get(1)
+            val afterWhatsapp = text
+                .replace(Regex("""(?i)\b(?:open|send|message|msg|text|chat|on|in|to|whatsapp|wa)\b"""), " ")
+                .replace(Regex("""(?:হোয়াটসঅ্যাপে|হোয়াটসঅ্যাপে|হোয়াটসঅ্যাপ|হোয়াটসঅ্যাপ)"""), " ")
+                .replace(Regex("""^\s*(?:e|te|এ)\s+""", RegexOption.IGNORE_CASE), "")
+                .trim()
+
+            // Check pattern: "<Name> ke [bolo|likho|pathao|message] <Payload>"
+            val targetAndMsg = Regex(
+                """^(.+?)\s+(?:ke|কে)\s+(?:message|msg|text|bolo|bol|likho|pathao|পাঠাও|বলো|বল|লিখো|যে)?\s*(.+)$""",
+                RegexOption.IGNORE_CASE
+            ).find(text.substringAfter("whatsapp", "").trim().ifBlank { afterWhatsapp })
+
+            val targetName = targetAndMsg?.groupValues?.get(1)
+                ?.replace(Regex("""(?i)^(?:e|te|to|for)\s+"""), "")
+                ?.trim()
+                .orEmpty()
+            val extractedBody = targetAndMsg?.groupValues?.get(2)
+                ?.replace(Regex("""(?i)^(?:message|msg|pathao|bolo|likho|পাঠাও|বলো|লিখো)\s+"""), "")
+                ?.trim()
+                ?: afterWhatsapp
+                    .replace(digits ?: "", "")
+                    .replace(Regex("""(?i)\b(?:pathao|bolo|likho)\b|পাঠাও|বলো|লিখো"""), "")
+                    .trim()
+
+            if (digits != null) {
+                val cleanDigits = digits.replace(Regex("[^0-9]"), "")
+                val payload = extractedBody.ifBlank { "Hello!" }
+                val encoded = URLEncoder.encode(payload, "UTF-8")
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$cleanDigits?text=$encoded")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+                ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "1000")
+                return PhoneCommandOutcome.Executed("WhatsApp-e $digits ke '$payload' pathiye dichi boss.")
+            } else if (targetName.isNotBlank()) {
+                val phone = findContactPhoneNumber(targetName)
+                val payload = extractedBody.ifBlank { "Assalamu Alaikum!" }
+                if (phone != null) {
+                    val cleanDigits = phone.replace(Regex("[^0-9]"), "")
+                    val encoded = URLEncoder.encode(payload, "UTF-8")
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$cleanDigits?text=$encoded")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    })
+                    ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "1000")
+                    return PhoneCommandOutcome.Executed("WhatsApp-e $targetName ($phone) ke message pathiye dichi boss.")
+                } else {
+                    launchApp("com.whatsapp")
+                    ZeeAccessibilityService.sendControlCommand(context, "SEARCH_IN_APP", targetName)
+                    return PhoneCommandOutcome.Executed("WhatsApp open kore '$targetName' khuje dichi boss.")
+                }
+            } else if (extractedBody.isNotBlank() && ZeeAccessibilityService.currentForegroundPackage() == "com.whatsapp") {
+                val ok = runAccessibilityAction("TYPE_AND_SEND", extractedBody) { it.autoTypeAndSend(extractedBody) }
+                    ?: return PhoneCommandOutcome.Executed("WhatsApp message send korte Accessibility ON koro boss.")
+                return PhoneCommandOutcome.Executed(if (ok) "WhatsApp-e '$extractedBody' pathiye diyechi boss." else "Chat box khola thakle abar bolo boss.")
+            } else if (hasAnyTerm(lower, "message", "msg", "pathao", "chat", "পাঠাও")) {
+                launchApp("com.whatsapp")
+                return PhoneCommandOutcome.Executed("WhatsApp open korechi boss. Chat select korlei message pathate parbe.")
+            }
+        }
+
+        // 5. Autonomous Messaging: Messenger / SMS / Active Chat
         if ((lower.contains("messenger") || lower.contains("facebook")) &&
-            hasAnyTerm(lower, "message", "msg", "pathao", "পাঠাও", "inbox")
+            hasAnyTerm(lower, "message", "msg", "pathao", "chat", "পাঠাও", "inbox", "text")
         ) {
             launchApp("com.facebook.orca")
-            val textToExtract = rawInput.replace(Regex("(?i)(?:messenger|facebook|message|msg|pathao|পাঠাও|inbox)"), "").trim()
-            if (textToExtract.isNotBlank()) {
-                val service = ZeeAccessibilityService.getInstance()
-                if (service != null) {
-                    service.autoTypeAndSend(textToExtract)
-                } else if (ZeeAccessibilityService.isServiceEnabled(context)) {
-                    ZeeAccessibilityService.sendControlCommand(context, "TYPE_TEXT", textToExtract)
-                    ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "900")
-                }
+            val textToExtract = text
+                .replace(Regex("""(?i)\b(?:open|messenger|facebook|message|msg|chat|pathao|inbox|text|on|in|e|te)\b|পাঠাও|মেসেঞ্জার"""), " ")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+            if (textToExtract.isNotBlank() && ZeeAccessibilityService.isServiceEnabled(context)) {
+                ZeeAccessibilityService.sendControlCommand(context, "TYPE_AND_SEND", textToExtract)
             }
             return PhoneCommandOutcome.Executed("Messenger inbox open kore diyechi boss.")
         }
 
-        // 6. Active Screen Auto-Type, Click & Scroll
-        Regex("""^(?:click|tap|press|চাপো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let { m ->
+        if (hasAnyTerm(lower, "sms", "text message", "message", "msg", "মেসেজ") &&
+            hasAnyTerm(lower, "pathao", "send", "bolo", "likho", "text", "পাঠাও", "লেখো")
+        ) {
+            val digits = Regex("(\\+?\\d{6,15})").find(rawInput)?.groupValues?.get(1)
+            val cleanedSms = text
+                .replace(Regex("""(?i)\b(?:sms|text|message|msg|send|pathao|koro|dao)\b|মেসেজ|পাঠাও"""), " ")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+            if (digits != null) {
+                val body = cleanedSms.replace(digits, "").trim().ifBlank { "Hello!" }
+                context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$digits")).apply {
+                    putExtra("sms_body", body)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+                ZeeAccessibilityService.sendControlCommand(context, "CLICK_SEND", "900")
+                return PhoneCommandOutcome.Executed("$digits nambore SMS ready korechi boss.")
+            }
+            val fg = ZeeAccessibilityService.currentForegroundPackage()
+            if (fg.isNotBlank() && fg != context.packageName && cleanedSms.isNotBlank()) {
+                val ok = runAccessibilityAction("TYPE_AND_SEND", cleanedSms) { it.autoTypeAndSend(cleanedSms) }
+                    ?: return PhoneCommandOutcome.Executed("Chat-e message pathate Accessibility ON kore dao boss.")
+                return PhoneCommandOutcome.Executed(if (ok) "Active chat-e '$cleanedSms' pathiye diyechi boss." else "Active chat input box pawa jayni boss.")
+            }
+        }
+
+        // 6. Active Screen Auto-Type, Chat-Send, Find/Search, Click & Scroll
+        Regex("""^(?:click|tap|press|চাপো|ক্লিক\s*করো|ট্যাপ\s*করো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let { m ->
             val targetLabel = m.groupValues[1].trim()
             val ok = runAccessibilityAction("CLICK_TEXT", targetLabel) { it.clickNodeContainingText(targetLabel) }
                 ?: return PhoneCommandOutcome.Executed("Screen click korte Phone Control tab theke Accessibility ON kore dao boss.")
             return PhoneCommandOutcome.Executed(if (ok) "'$targetLabel'-e tap kore diyechi boss." else "'$targetLabel' screen-e khuje pawa jayni boss.")
         }
-        Regex("""^(?:type|write|লিখো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let { m ->
-            val payload = m.groupValues[1].trim()
-            val ok = runAccessibilityAction("TYPE_TEXT", payload) { it.typeTextIntoFocusedField(payload) }
-                ?: return PhoneCommandOutcome.Executed("Type korte Accessibility permission ON thakte hobe boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Text field-e likhe diyechi boss." else "Active kono text box pawa jayni boss.")
+
+        // Instant "Send" button tap inside open chat
+        if (lower in listOf("send", "send koro", "পাঠাও", "পাঠিয়ে দাও", "পাঠিয়ে দাও")) {
+            runAccessibilityAction("CLICK_SEND", "50") { it.autoClickSendAfterDelay(50L); true }
+                ?: return PhoneCommandOutcome.Executed("Send button click korte Accessibility ON koro boss.")
+            return PhoneCommandOutcome.Executed("Send button press kore diyechi boss.")
         }
-        if (lower.contains("type and send") || lower.contains("msg type") || lower.contains("message type") || lower.contains("send this") || lower.contains("এই মেসেজ পাঠাও")) {
-            val toType = rawInput.replace(Regex("(?i)(?:type and send|msg type|message type|send this|এই মেসেজ পাঠাও)"), "").trim()
+
+        // Type & Send ("type and send ...", "chat ...", "reply ...", "likhe pathao ...")
+        Regex("""^(?:type and send|send message|chat|reply|send|pathao|msg type|message type|এই মেসেজ পাঠাও|রিপ্লাই দাও|চ্যাটে লেখো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let { m ->
+            val toType = m.groupValues[1].trim()
             if (toType.isNotBlank()) {
-                val ok = runAccessibilityAction("TYPE_TEXT", toType) { it.autoTypeAndSend(toType) }
+                val ok = runAccessibilityAction("TYPE_AND_SEND", toType) { it.autoTypeAndSend(toType) }
                     ?: return PhoneCommandOutcome.Executed("Auto-send korte Accessibility ON kore dao boss.")
                 return PhoneCommandOutcome.Executed(
-                    if (ok) "Screen-er active inbox-e message type kore send kore diyechi boss."
-                    else "Active kono text box pawa jayni boss (chat open koro)."
+                    if (ok) "Active inbox-e '$toType' type kore send kore diyechi boss."
+                    else "Active kono chat input box pawa jayni boss."
                 )
             }
         }
-        if (lower.contains("scroll down") || lower.contains("niche scroll") || lower.contains("নিচে স্ক্রল")) {
-            val ok = runAccessibilityAction("SCROLL", "DOWN") { it.scrollCurrentScreen(down = true) }
-                ?: return PhoneCommandOutcome.Executed("Scroll korte Accessibility permission ON kore dao boss.")
-            return PhoneCommandOutcome.Executed(if (ok) "Screen niche scroll kore diyechi boss." else "Scroll kora jayni boss.")
+
+        // Direct text typing ("type ...", "write ...", "likho ...", "text likho ...", "লিখো ...")
+        Regex("""^(?:type|write|text likho|txt likho|likho|lekh|লিখো|লেখো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let { m ->
+            val payload = m.groupValues[1].trim()
+            val ok = runAccessibilityAction("TYPE_TEXT", payload) { it.typeTextIntoFocusedField(payload) }
+                ?: return PhoneCommandOutcome.Executed("Type korte Accessibility permission ON thakte hobe boss.")
+            return PhoneCommandOutcome.Executed(if (ok) "'$payload' text box-e likhe diyechi boss." else "Active kono text box pawa jayni boss.")
         }
-        if (lower.contains("scroll up") || lower.contains("upore scroll") || lower.contains("উপরে স্ক্রল")) {
-            val ok = runAccessibilityAction("SCROLL", "UP") { it.scrollCurrentScreen(down = false) }
+
+        // In-App Find / Search OR Fallback to Google Web Search
+        Regex("""^(?:search|find|khujo|khuj|সার্চ করো|সার্চ|খোঁজো|খুঁজো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let { m ->
+            val query = m.groupValues[1]
+                .replace(Regex("""(?i)\s+(?:search|find|khujo|koro|kor|সার্চ|খোঁজো|করো)$"""), "")
+                .trim()
+            if (query.isNotBlank()) {
+                val fg = ZeeAccessibilityService.currentForegroundPackage()
+                val inExternalApp = fg.isNotBlank() && fg != context.packageName && !fg.contains("launcher")
+                return if (inExternalApp && ZeeAccessibilityService.isServiceEnabled(context)) {
+                    val isFind = lower.startsWith("find") || lower.startsWith("khuj") || lower.startsWith("খোঁজো") || lower.startsWith("খুঁজো")
+                    if (isFind) {
+                        ZeeAccessibilityService.sendControlCommand(context, "FIND_OR_SEARCH", query)
+                    } else {
+                        ZeeAccessibilityService.sendControlCommand(context, "SEARCH_IN_APP", query)
+                    }
+                    PhoneCommandOutcome.Executed("Active app-e '$query' search/find kore dichi boss.")
+                } else {
+                    val ok = openGoogleSearch(query)
+                    PhoneCommandOutcome.Executed(if (ok) "Google-e '$query' search kore diyechi boss." else "Search open kora jayni boss.")
+                }
+            }
+        }
+
+        // Expanded Scroll Variants (Down / Up / Left / Right)
+        if (hasAnyTerm(lower, "scroll up", "upore scroll", "upore jao", "upore utho", "উপরে স্ক্রল", "উপরে যাও")) {
+            val ok = runAccessibilityAction("SCROLL", "UP") { it.swipeDirection("UP") }
                 ?: return PhoneCommandOutcome.Executed("Scroll korte Accessibility permission ON kore dao boss.")
             return PhoneCommandOutcome.Executed(if (ok) "Screen upore scroll kore diyechi boss." else "Scroll kora jayni boss.")
+        }
+        if (hasAnyTerm(lower, "scroll left", "swipe left", "বামে স্ক্রল")) {
+            val ok = runAccessibilityAction("SCROLL", "LEFT") { it.swipeDirection("LEFT") }
+                ?: return PhoneCommandOutcome.Executed("Scroll korte Accessibility permission ON kore dao boss.")
+            return PhoneCommandOutcome.Executed(if (ok) "Screen left swipe korechi boss." else "Swipe failed boss.")
+        }
+        if (hasAnyTerm(lower, "scroll right", "swipe right", "ডানে স্ক্রল")) {
+            val ok = runAccessibilityAction("SCROLL", "RIGHT") { it.swipeDirection("RIGHT") }
+                ?: return PhoneCommandOutcome.Executed("Scroll korte Accessibility permission ON kore dao boss.")
+            return PhoneCommandOutcome.Executed(if (ok) "Screen right swipe korechi boss." else "Swipe failed boss.")
+        }
+        if (lower == "scroll" || lower == "স্ক্রল" || hasAnyTerm(lower, "scroll down", "niche scroll", "niche jao", "niche namo", "scroll more", "নিচে স্ক্রল", "নিচে যাও")) {
+            val ok = runAccessibilityAction("SCROLL", "DOWN") { it.swipeDirection("DOWN") }
+                ?: return PhoneCommandOutcome.Executed("Scroll korte Accessibility permission ON kore dao boss.")
+            return PhoneCommandOutcome.Executed(if (ok) "Screen niche scroll kore diyechi boss." else "Scroll kora jayni boss.")
         }
 
         // 7. Phone Calls ("call 017xxxxxxxx", "call Abba", "Rahim ke call dao", "ফোন করো")
@@ -520,17 +729,20 @@ class NativePhoneCommander(private val context: Context) {
             "হোয়াটসঅ্যাপ" to "whatsapp",
             "হোয়াটসঅ্যাপ" to "whatsapp",
             "মেসেঞ্জার" to "messenger",
+            "ম্যাসেঞ্জার" to "messenger",
             "ইনস্টাগ্রাম" to "instagram",
             "ক্যালকুলেটর" to "calculator",
             "ক্যামেরা" to "camera",
             "সেটিংস" to "settings",
             "গ্যালারি" to "gallery",
             "ক্রোম" to "chrome",
+            "গুগল" to "google",
             "ম্যাপ" to "maps",
             "জিমেইল" to "gmail",
             "ফোন" to "phone",
             "মেসেজ" to "messages",
-            "টেলিগ্রাম" to "telegram"
+            "টেলিগ্রাম" to "telegram",
+            "প্লে স্টোর" to "play store"
         )
 
         var targetQuery = clean
@@ -592,6 +804,51 @@ class NativePhoneCommander(private val context: Context) {
         }
 
         return null
+    }
+
+    private fun openYouTubeSearch(query: String): Boolean {
+        val clean = query.trim()
+        val ytSearchIntent = Intent(Intent.ACTION_SEARCH).apply {
+            setPackage("com.google.android.youtube")
+            putExtra("query", clean)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (runCatching { context.startActivity(ytSearchIntent); true }.getOrDefault(false)) {
+            return true
+        }
+        val encoded = URLEncoder.encode(clean, "UTF-8")
+        return runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$encoded"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun openGoogleSearch(query: String): Boolean {
+        val clean = query.trim()
+        val encoded = URLEncoder.encode(clean, "UTF-8")
+        val browserUrlIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$encoded")).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (runCatching { context.startActivity(browserUrlIntent); true }.getOrDefault(false)) {
+            return true
+        }
+        val webSearchIntent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+            putExtra(android.app.SearchManager.QUERY, clean)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return runCatching { context.startActivity(webSearchIntent); true }.getOrDefault(false)
+    }
+
+    private fun dispatchMediaKey(keyCode: Int): Boolean {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+        return runCatching {
+            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+            true
+        }.getOrDefault(false)
     }
 
     private fun launchApp(packageName: String): Boolean {
