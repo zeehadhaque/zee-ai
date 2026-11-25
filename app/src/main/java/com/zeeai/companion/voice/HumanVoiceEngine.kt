@@ -28,7 +28,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -45,12 +44,10 @@ data class OnlineVoiceStatusInfo(
 /**
  * 100% Online Human Neural Voice Engine for ZEE (Male) & ZHEE (Female).
  *
- * Cascade:
- * 1. ElevenLabs Multilingual v2 (Cinema-grade expressive human voice, custom Male/Female voice IDs)
- * 2. Google Gemini 2.5 Studio Native Audio (`gemini-2.5-flash-preview-tts`, real 24kHz PCM Male/Female studio voices)
- * 3. Google Cloud Neural Translate Audio (Zero-API-Key online human voice in Bengali/English)
- *
- * Offline robotic TTS / Sherpa-ONNX packs are permanently removed.
+ * Cascade (Google Translate robotic TTS permanently removed):
+ * 1. ElevenLabs Multilingual v2 (Cinema-grade expressive human voice, when API key configured)
+ * 2. Microsoft Edge Neural Studio (`bn-BD-PradeepNeural` / `bn-BD-NabanitaNeural` / `AndrewMultilingualNeural` / `AvaMultilingualNeural`, zero-key HD human neural audio)
+ * 3. Google Gemini 2.5 Studio Native Audio (`gemini-2.5-flash-preview-tts`, 24kHz PCM Charon/Kore fallback when Edge unavailable & API key present)
  */
 class HumanVoiceEngine(
     private val context: Context,
@@ -70,12 +67,6 @@ class HumanVoiceEngine(
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .callTimeout(25, TimeUnit.SECONDS)
-        .build()
-
-    private val cloudFreeHttpClient = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(6, TimeUnit.SECONDS)
-        .callTimeout(8, TimeUnit.SECONDS)
         .build()
 
     @Volatile
@@ -111,26 +102,20 @@ class HumanVoiceEngine(
         return when {
             !isOnline -> OnlineVoiceStatusInfo(
                 activeProviderName = "Internet Required (Online Voice Only)",
-                maleVoiceLabel = "ZEE (${cfg.geminiMaleVoice})",
-                femaleVoiceLabel = "ZHEE (${cfg.geminiFemaleVoice})",
+                maleVoiceLabel = "ZEE (PradeepNeural / Andrew)",
+                femaleVoiceLabel = "ZHEE (NabanitaNeural / Ava)",
                 isReady = false
             )
             elevenLabsApiKey.isNotBlank() -> OnlineVoiceStatusInfo(
-                activeProviderName = "ElevenLabs Cinema Studio v2",
+                activeProviderName = "ElevenLabs Cinema Studio v2 + Edge Neural HD",
                 maleVoiceLabel = OnlineHumanVoiceCatalog.getVoiceDisplayName(cfg.elevenLabsMaleId, isFemale = false),
                 femaleVoiceLabel = OnlineHumanVoiceCatalog.getVoiceDisplayName(cfg.elevenLabsFemaleId, isFemale = true),
                 isReady = true
             )
-            geminiApiKey.isNotBlank() -> OnlineVoiceStatusInfo(
-                activeProviderName = "Gemini 2.5 Studio Neural Voice",
-                maleVoiceLabel = "ZEE • ${cfg.geminiMaleVoice}",
-                femaleVoiceLabel = "ZHEE • ${cfg.geminiFemaleVoice}",
-                isReady = true
-            )
             else -> OnlineVoiceStatusInfo(
-                activeProviderName = "Cloud Neural Voice (Free Online)",
-                maleVoiceLabel = "ZEE • Cloud Male Tone",
-                femaleVoiceLabel = "ZHEE • Cloud Female Tone",
+                activeProviderName = "Edge Neural Studio HD (Zero-Key Human Voice)",
+                maleVoiceLabel = "ZEE • PradeepNeural / Andrew",
+                femaleVoiceLabel = "ZHEE • NabanitaNeural / Ava",
                 isReady = true
             )
         }
@@ -217,14 +202,14 @@ class HumanVoiceEngine(
                     completed = tryPlayElevenLabs(cleanText, persona, elevenLabsApiKey, mySessionId)
                 }
 
-                // 2. Google Gemini 2.5 Native Studio TTS (Charon/Fenrir Male, Kore/Aoede Female)
-                if (!completed && isActive && sessionCounter.get() == mySessionId && geminiApiKey.isNotBlank()) {
-                    completed = tryPlayGeminiStudioTts(cleanText, persona, geminiApiKey, mySessionId)
+                // 2. Microsoft Edge Neural Studio HD (Free, Ultra-Natural Bengali & English Human Voices — Zero Google Robotic TTS)
+                if (!completed && isActive && sessionCounter.get() == mySessionId) {
+                    completed = tryPlayEdgeNeuralStudio(cleanText, persona, mySessionId)
                 }
 
-                // 3. Free Cloud Neural Human Voice (Zero-Key Online Bengali & English)
-                if (!completed && isActive && sessionCounter.get() == mySessionId) {
-                    completed = tryPlayCloudNeuralTts(cleanText, persona, mySessionId)
+                // 3. Google Gemini 2.5 Native Studio TTS (Charon/Fenrir Male, Kore/Aoede Female) fallback
+                if (!completed && isActive && sessionCounter.get() == mySessionId && geminiApiKey.isNotBlank()) {
+                    completed = tryPlayGeminiStudioTts(cleanText, persona, geminiApiKey, mySessionId)
                 }
 
                 if (!completed && isActive && sessionCounter.get() == mySessionId) {
@@ -408,52 +393,33 @@ class HumanVoiceEngine(
         return false
     }
 
-    private suspend fun tryPlayCloudNeuralTts(
+    private suspend fun tryPlayEdgeNeuralStudio(
         text: String,
         persona: VoicePersona,
         mySessionId: Long
     ): Boolean {
         return runCatching {
-            val isBengali = text.any { it in '\u0980'..'\u09FF' }
-            val langCode = if (isBengali) "bn" else "en"
+            val isFemale = persona == VoicePersona.ZHEE_FEMALE
             val sentences = splitIntoSentences(text)
             if (sentences.isEmpty()) return false
 
-            val pitch = if (persona == VoicePersona.ZEE_MALE) 0.90f else 1.05f
-            val speed = if (persona == VoicePersona.ZEE_MALE) 1.02f else 0.98f
-
             var anyPlayed = false
-            for (sentence in sentences) {
+            for (chunk in sentences) {
                 if (!scope.isActive || sessionCounter.get() != mySessionId) break
-                val encoded = URLEncoder.encode(sentence, "UTF-8")
-                val url = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=$langCode&q=$encoded"
-
-                val req = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36")
-                    .build()
-
-                val bytes = cloudFreeHttpClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) null
-                    else {
-                        val ct = resp.header("Content-Type")
-                        val raw = resp.body?.bytes()
-                        if (isValidAudioPayload(ct, raw)) raw else null
-                    }
-                } ?: return anyPlayed
-
+                val mp3Bytes = EdgeNeuralTtsClient.synthesizeMp3(apiHttpClient, chunk, isFemale)
+                    ?: return anyPlayed
                 if (sessionCounter.get() != mySessionId) return anyPlayed
 
-                val tempFile = File(appContext.cacheDir, "zee_cloud_${System.currentTimeMillis()}.mp3")
-                tempFile.writeBytes(bytes)
-                val played = playMp3File(tempFile, pitch = pitch, speed = speed)
+                val tempFile = File(appContext.cacheDir, "zee_edge_${System.currentTimeMillis()}.mp3")
+                tempFile.writeBytes(mp3Bytes)
+                val played = playMp3File(tempFile, pitch = 1.0f, speed = 1.0f)
                 runCatching { tempFile.delete() }
                 if (!played) return anyPlayed
                 anyPlayed = true
             }
             anyPlayed
         }.getOrElse {
-            Log.w(TAG, "Cloud Neural TTS error: ${it.message}")
+            Log.w(TAG, "Edge Neural Studio TTS error: ${it.message}")
             false
         }
     }
