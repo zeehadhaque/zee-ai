@@ -75,13 +75,12 @@
             </intent-filter>
         </activity>
 
-        <!-- Isolated :control Process Accessibility Service (Screen Automation + Macro Recorder) -->
+        <!-- Accessibility Service (Screen Automation + Macro Recorder) — runs in main process so companion can access instance -->
         <service
             android:name=".automation.ZeeAccessibilityService"
             android:exported="false"
             android:label="@string/app_name"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:process=":control">
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
