@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,38 +8,72 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        FileInputStream(keystorePropsFile).use { load(it) }
+    }
+}
+
+val rawStoreFile = keystoreProps.getProperty("storeFile") ?: ""
+val resolvedStoreFile = if (file(rawStoreFile).exists()) {
+    file(rawStoreFile)
+} else {
+    rootProject.file(rawStoreFile)
+}
+
+val hasReleaseKeystore = keystorePropsFile.exists() &&
+    rawStoreFile.isNotBlank() &&
+    resolvedStoreFile.exists()
+
 android {
     namespace = "com.zeeai.companion"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.zeeai.companion"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 3
+        targetSdk = 35
+        versionCode = 16
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
+        // Modern 64-bit phone (Xiaomi-shoho) er jonno APK size halka rakhte
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
-    buildFeatures {
-        compose = true
-        buildConfig = true
+    signingConfigs {
+        create("release") {
+            if (hasReleaseKeystore) {
+                storeFile = resolvedStoreFile
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
-        release {
+        getByName("release") {
+            isDebuggable = false
+            // MediaPipe JNI ও Compose reflection 100% crash-free রাখতে minify false রাখা হলো
             isMinifyEnabled = false
+            isShrinkResources = false
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
-        debug {
-            isMinifyEnabled = false
+        getByName("debug") {
+            isDebuggable = true
         }
     }
 
@@ -47,6 +84,11 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -62,6 +104,12 @@ android {
 }
 
 dependencies {
+    // Official Sherpa-ONNX Android AAR (app/libs/ folder-e rakha hobe)
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+
+    // Official k2-fsa/sherpa-onnx .tar.bz2 neural voice pack extract korar jonno
+    implementation("org.apache.commons:commons-compress:1.27.1")
+
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.9.3")
