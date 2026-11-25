@@ -53,3 +53,10 @@ android/.gradle/
 
 .env*
 !.env.example
+
+
+# Release Signing Secrets (NEVER commit to Git)
+*.jks
+*.keystore
+keystore.properties
+app/zee-release.jks
