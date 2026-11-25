@@ -32,25 +32,8 @@ class OfflineAutonomousPhoneController(
     private val context: Context,
     private val memoryVault: PersonalOfflineMemoryVault
 ) {
-    private val toolPattern = Regex("""\[\[TOOL:([A-Z_]+)\|([^\]]+)]]""")
-
-    private fun normalizeVoiceCommand(raw: String): String {
-        var text = raw.trim()
-        // শুরু থেকে Wake-word ও সম্বোধন বাদ দেওয়া (Hey ZEE / ZHEE / জি / বন্ধু / ভাই / প্লিজ / বস / boss)
-        val prefixRegex = Regex(
-            """^(?:hey\s+|ok\s+|hi\s+|hello\s+)?(?:zee|zhee|ji|g|জি|ঝি|বন্ধু|ভাই|প্লিজ|please|বস|boss)[,\s।:!-]+""",
-            RegexOption.IGNORE_CASE
-        )
-        repeat(2) {
-            text = text.replace(prefixRegex, "").trim()
-        }
-        // শেষের দাঁড়ি, ফুলস্টপ, প্রশ্নবোধক বা "please / একটু / তো / বস / boss" বাদ দেওয়া
-        text = text
-            .replace(Regex("""[।.!?,"']+$"""), "")
-            .replace(Regex("""\s+(?:please|plz|প্লিজ|দাও|করো তো|তো|একটু|বস|boss)$""", RegexOption.IGNORE_CASE), "")
-            .trim()
-        return text
-    }
+    private val toolPattern = Regex("""\[\[TOOL:([A-Z_]+)\|([^\]]*)]]""")
+    private val nativeCommander by lazy { NativePhoneCommander(context) }
 
     fun executeToolsInAiResponse(rawAiOutput: String): Pair<String, List<String>> {
         val actionLogs = mutableListOf<String>()
@@ -65,113 +48,14 @@ class OfflineAutonomousPhoneController(
     }
 
     fun tryInstantOfflineCommand(input: String): OfflineToolOutcome {
-        val text = normalizeVoiceCommand(input)
-        if (text.isBlank()) return OfflineToolOutcome(false, false, "")
-        val lower = text.lowercase()
-
-        // ১. সময় ও ব্যাটারি
-        if (lower in listOf("time", "koyta baje", "koita baje", "এখন কয়টা বাজে", "সময় কত", "what time is it") ||
-            Regex("""(?:koyta|koita|কয়টা)\s+(?:baje|বাজে)""").containsMatchIn(lower) ||
-            Regex("""(?:what\s+time|current\s+time)""").containsMatchIn(lower)
-        ) {
-            val now = SimpleDateFormat("hh:mm a, EEEE, dd MMM", Locale.getDefault()).format(Date())
-            return OfflineToolOutcome(true, true, "এখন বাজে $now বস!")
-        }
-        if (lower.contains("battery") || lower.contains("ব্যাটারি") || lower.contains("চার্জ কত") || lower.contains("charge koto")) {
-            return OfflineToolOutcome(true, true, "ফোনে এখন ${getBatteryPercent()}% চার্জ আছে বস।")
-        }
-
-        // ২. ফ্ল্যাশলাইট (CAMERA permission ছাড়াই API 23+ এ কাজ করে)
-        if (lower.contains("torch") || lower.contains("flash") || lower.contains("টর্চ") || lower.contains("ফ্ল্যাশ") || lower.contains("লাইট")) {
-            val off = lower.contains("off") || lower.contains("bondho") || lower.contains("বন্ধ") || lower.contains("nivao") || lower.contains("নিভাও")
-            val on = lower.contains("on") || lower.contains("chalu") || lower.contains("চালু") || lower.contains("jalao") || lower.contains("জ্বালাও") || lower.contains("দাও")
-            if (off) return dispatchTool("TORCH", "OFF")
-            if (on) return dispatchTool("TORCH", "ON")
-        }
-
-        // ৩. ভলিউম
-        if (lower.contains("volume") || lower.contains("sound") || lower.contains("ভলিউম") || lower.contains("সাউন্ড") || lower.contains("আওয়াজ")) {
-            return when {
-                lower.contains("mute") || lower.contains("silent") || lower.contains("মিউট") || lower.contains("থামাও") -> dispatchTool("VOLUME", "MUTE")
-                lower.contains("max") || lower.contains("full") || lower.contains("ফুল") -> dispatchTool("VOLUME", "MAX")
-                lower.contains("down") || lower.contains("komao") || lower.contains("কমাও") || lower.contains("low") -> dispatchTool("VOLUME", "DOWN")
-                lower.contains("up") || lower.contains("barao") || lower.contains("বাড়াও") || lower.contains("high") -> dispatchTool("VOLUME", "UP")
-                else -> OfflineToolOutcome(false, false, "")
+        when (val outcome = nativeCommander.tryHandleCommand(input)) {
+            is PhoneCommandOutcome.Executed -> return OfflineToolOutcome(true, true, outcome.replyText)
+            is PhoneCommandOutcome.NeedsConfirmation -> {
+                val res = runCatching { outcome.confirmation.onConfirm() }.getOrElse { outcome.confirmation.details }
+                return OfflineToolOutcome(true, true, res)
             }
+            is PhoneCommandOutcome.NotAPhoneCommand -> Unit
         }
-
-        // ৪. Cross-Process Accessibility কন্ট্রোল
-        if (lower.contains("screenshot") || lower.contains("স্ক্রিনশট")) return dispatchTool("NAV", "SCREENSHOT")
-        if (lower in listOf("go home", "home", "হোম", "হোম স্ক্রিন") || lower.contains("home screen") || lower.contains("হোমে যাও")) return dispatchTool("NAV", "HOME")
-        if (lower in listOf("go back", "back", "ব্যাক", "পিছনে যাও") || lower.contains("go back") || lower.contains("ব্যাকে যাও")) return dispatchTool("NAV", "BACK")
-        if (lower.contains("recent") || lower.contains("রিসেন্ট")) return dispatchTool("NAV", "RECENTS")
-        if (lower.contains("notification") || lower.contains("নোটিফিকেশন")) return dispatchTool("NAV", "NOTIFICATIONS")
-        if (lower.contains("lock screen") || lower.contains("phone lock") || lower.contains("screen lock") || lower.contains("স্ক্রিন লক") || lower.contains("ফোন লক")) return dispatchTool("NAV", "LOCK")
-        if (lower.contains("scroll down") || lower.contains("niche scroll") || lower.contains("নিচে স্ক্রল")) return dispatchTool("SCROLL", "DOWN")
-        if (lower.contains("scroll up") || lower.contains("upore scroll") || lower.contains("উপরে স্ক্রল")) return dispatchTool("SCROLL", "UP")
-
-        Regex("""^(?:click|tap|press|চাপো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let {
-            return dispatchTool("CLICK_TEXT", it.groupValues[1].trim())
-        }
-        Regex("""^(?:type|write|লিখো)\s+(.+)$""", RegexOption.IGNORE_CASE).find(text)?.let {
-            return dispatchTool("TYPE_TEXT", it.groupValues[1].trim())
-        }
-
-        // ৫. সেটিংস প্যানেল
-        if (lower.contains("wifi") || lower.contains("ওয়াইফাই")) {
-            if (lower.contains("on") || lower.contains("off") || lower.contains("open") || lower.contains("setting") || lower.contains("খোলো")) {
-                return dispatchTool("SETTINGS", "WIFI")
-            }
-        }
-        if (lower.contains("bluetooth") || lower.contains("ব্লুটুথ")) return dispatchTool("SETTINGS", "BLUETOOTH")
-        if (lower.contains("brightness") || lower.contains("ব্রাইটনেস")) return dispatchTool("SETTINGS", "BRIGHTNESS")
-
-        // ৬. কল (নম্বর বা কন্টাক্ট নাম — যেমন "call Siam", "Siam ke call dao", "017... call")
-        val numberRegex = Regex("""(\+?\d[\d\s-]{5,15}\d)""")
-        if (lower.contains("call") || lower.contains("কল") || lower.contains("dial")) {
-            val numberMatch = numberRegex.find(text)
-            if (numberMatch != null) {
-                val cleanNum = numberMatch.groupValues[1].replace(" ", "").replace("-", "")
-                return dispatchTool("CALL", cleanNum)
-            }
-            val namePatterns = listOf(
-                Regex("""^(?:call|dial|কল করো|কল দাও)\s+(.+)$""", RegexOption.IGNORE_CASE),
-                Regex("""^(.+?)\s*(?:ke|কে)\s+(?:call|কল)\s*(?:dao|koro|দাও|করো)?$""", RegexOption.IGNORE_CASE)
-            )
-            for (p in namePatterns) {
-                val m = p.find(text) ?: continue
-                val contactName = m.groupValues[1].trim()
-                if (contactName.length in 2..32) {
-                    return dispatchTool("CALL", contactName)
-                }
-            }
-        }
-
-        // ৭. টাইমার ও অ্যালার্ম
-        val timerRegex = Regex("""(\d+)\s*(?:min|minute|minutes|মিনিট)""", RegexOption.IGNORE_CASE)
-        if ((lower.contains("timer") || lower.contains("টাইমার")) && timerRegex.containsMatchIn(text)) {
-            return dispatchTool("TIMER", timerRegex.find(text)!!.groupValues[1])
-        }
-        val alarmRegex = Regex("""(\d{1,2}):(\d{2})""")
-        if ((lower.contains("alarm") || lower.contains("অ্যালার্ম")) && alarmRegex.containsMatchIn(text)) {
-            val m = alarmRegex.find(text)!!
-            return dispatchTool("ALARM", "${m.groupValues[1]}:${m.groupValues[2]}")
-        }
-
-        // ৮. অ্যাপ ওপেন (<queries> দিয়ে, QUERY_ALL_PACKAGES ছাড়াই)
-        val openPatterns = listOf(
-            Regex("""^(?:open|launch|start|run|chalu koro|খুলুন|খোলো|চালু করো|ওপেন করো)\s+(.+)$""", RegexOption.IGNORE_CASE),
-            Regex("""^(.+?)\s+(?:kholo|khulo|open koro|chalu koro|open|launch|খোলো|চালু করো|ওপেন করো|খুলুন)$""", RegexOption.IGNORE_CASE)
-        )
-        for (regex in openPatterns) {
-            val m = regex.find(text) ?: continue
-            val query = m.groupValues[1].trim()
-            if (query.length in 2..32) {
-                val res = dispatchTool("OPEN_APP", query)
-                if (res.success) return res
-            }
-        }
-
         return OfflineToolOutcome(handled = false, success = false, reply = "")
     }
 
@@ -179,6 +63,20 @@ class OfflineAutonomousPhoneController(
         return try {
             when (tool) {
                 "OPEN_APP" -> openAppByName(arg)
+                "YT_SEARCH" -> {
+                    val outcome = nativeCommander.tryHandleCommand("youtube play $arg")
+                    if (outcome is PhoneCommandOutcome.Executed) OfflineToolOutcome(true, true, outcome.replyText)
+                    else OfflineToolOutcome(true, false, "YouTube open kora jayni.")
+                }
+                "GOOGLE_SEARCH" -> {
+                    val outcome = nativeCommander.tryHandleCommand("google $arg")
+                    if (outcome is PhoneCommandOutcome.Executed) OfflineToolOutcome(true, true, outcome.replyText)
+                    else OfflineToolOutcome(true, false, "Google search open kora jayni.")
+                }
+                "SEARCH_IN_APP" -> sendCrossProcessAccessibility("SEARCH_IN_APP", arg)
+                "TYPE_AND_SEND" -> sendCrossProcessAccessibility("TYPE_AND_SEND", arg)
+                "POST" -> sendCrossProcessAccessibility("FB_POST", arg)
+                "SKIP_AD" -> sendCrossProcessAccessibility("SKIP_AD", "")
                 "TORCH" -> toggleFlashlight(arg.equals("ON", ignoreCase = true))
                 "VOLUME" -> adjustVolume(arg)
                 "CALL" -> dialNumberOrContact(arg)
@@ -201,13 +99,17 @@ class OfflineAutonomousPhoneController(
 
     private fun sendCrossProcessAccessibility(type: String, arg: String): OfflineToolOutcome {
         if (!ZeeAccessibilityService.isServiceEnabled(context)) {
-            return OfflineToolOutcome(true, false, "ফোন কন্ট্রোলের জন্য Models ট্যাব থেকে ZEE AI Accessibility চালু করে নাও বস।")
+            return OfflineToolOutcome(true, false, "ফোন কন্ট্রোলের জন্য Phone Control বা Permissions Hub থেকে ZEE AI Accessibility চালু করে নাও বস।")
         }
         ZeeAccessibilityService.sendControlCommand(context, type, arg)
         val msg = when (type) {
             "SCROLL" -> "স্ক্রল করে দিয়েছি বস!"
             "CLICK_TEXT" -> "'$arg'-এ ট্যাপ করে দিয়েছি বস!"
             "TYPE_TEXT" -> "লিখে দিয়েছি বস!"
+            "TYPE_AND_SEND" -> "মেসেজ লিখে পাঠিয়ে দিয়েছি বস!"
+            "SEARCH_IN_APP" -> "'$arg' সার্চ করে দিচ্ছি বস!"
+            "FB_POST" -> "পোস্ট রেডি করে দিচ্ছি বস!"
+            "SKIP_AD" -> "অ্যাড স্কিপ করে দিয়েছি বস!"
             else -> "করে দিয়েছি বস!"
         }
         return OfflineToolOutcome(true, true, msg)
