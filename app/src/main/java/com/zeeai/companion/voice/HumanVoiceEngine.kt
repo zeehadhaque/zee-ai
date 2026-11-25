@@ -202,14 +202,9 @@ class HumanVoiceEngine(
                     completed = tryPlayElevenLabs(cleanText, persona, elevenLabsApiKey, mySessionId)
                 }
 
-                // 2. Microsoft Edge Neural Studio HD (Free, Ultra-Natural Bengali & English Human Voices — Zero Google Robotic TTS)
+                // 2. Microsoft Edge Neural Studio HD (100% Google-Free Natural Bengali & English Human Voices)
                 if (!completed && isActive && sessionCounter.get() == mySessionId) {
                     completed = tryPlayEdgeNeuralStudio(cleanText, persona, mySessionId)
-                }
-
-                // 3. Google Gemini 2.5 Native Studio TTS (Charon/Fenrir Male, Kore/Aoede Female) fallback
-                if (!completed && isActive && sessionCounter.get() == mySessionId && geminiApiKey.isNotBlank()) {
-                    completed = tryPlayGeminiStudioTts(cleanText, persona, geminiApiKey, mySessionId)
                 }
 
                 if (!completed && isActive && sessionCounter.get() == mySessionId) {
