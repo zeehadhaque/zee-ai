@@ -146,8 +146,8 @@ class UnifiedCommandAndChatRouter(
             appendLine(identity)
             if (hermesDirective.isNotBlank()) appendLine(hermesDirective)
             appendLine("Mirror the user's exact language (Bengali / Banglish / English). Keep replies crisp, human, and fast.")
-            appendLine("If the user asks to perform a phone action, append ONE tool tag at the end:")
-            append("[[TOOL:OPEN_APP|name]], [[TOOL:TORCH|ON/OFF]], [[TOOL:VOLUME|UP/DOWN/MUTE/MAX]], [[TOOL:CALL|name_or_number]], [[TOOL:ALARM|HH:MM]], [[TOOL:TIMER|minutes]], [[TOOL:SETTINGS|WIFI/BLUETOOTH/BRIGHTNESS]], [[TOOL:NAV|HOME/BACK/SCREENSHOT/LOCK]], [[TOOL:SCROLL|DOWN/UP]], [[TOOL:CLICK_TEXT|label]].")
+            appendLine("If the user asks to perform a phone action, append one or more tool tags at the end:")
+            append("[[TOOL:OPEN_APP|name]], [[TOOL:YT_SEARCH|query]], [[TOOL:GOOGLE_SEARCH|query]], [[TOOL:SEARCH_IN_APP|query]], [[TOOL:TYPE_AND_SEND|text]], [[TOOL:POST|text]], [[TOOL:TORCH|ON/OFF]], [[TOOL:VOLUME|UP/DOWN/MUTE/MAX]], [[TOOL:CALL|name_or_number]], [[TOOL:SMS|number|body]], [[TOOL:ALARM|HH:MM]], [[TOOL:TIMER|minutes]], [[TOOL:SETTINGS|WIFI/BLUETOOTH/BRIGHTNESS]], [[TOOL:NAV|HOME/BACK/SCREENSHOT/LOCK]], [[TOOL:SCROLL|DOWN/UP/LEFT/RIGHT]], [[TOOL:CLICK_TEXT|label]], [[TOOL:TYPE_TEXT|text]], [[TOOL:SKIP_AD|1]].")
         }
     }
 }
