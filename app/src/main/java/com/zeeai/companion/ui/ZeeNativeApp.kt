@@ -332,11 +332,25 @@ fun ZeeNativeApp(
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, activeCharId) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                isAccessibilityActive = ZeeAccessibilityService.isServiceEnabled(context)
-                hasMic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    isAccessibilityActive = ZeeAccessibilityService.isServiceEnabled(context)
+                    hasMic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                    if (WakeWordEventBus.isHandsFreeSessionDesired.value && hasMic && !voiceController.isMicLockedOn.value) {
+                        voiceController.resumeAfterForegroundReturn()
+                    }
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    val keepHandsFree = WakeWordEventBus.isHandsFreeSessionDesired.value || voiceController.isMicLockedOn.value
+                    if (keepHandsFree && hasMic) {
+                        WakeWordEventBus.setPhoneMicSessionDesired(true)
+                        voiceController.suspendRecognizerForBackgroundHandoff()
+                        WakeWordForegroundService.startHandsFreeControl(context, isFemale = activeCharId == "zhee")
+                    }
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -1921,9 +1935,8 @@ fun ZeeNativeApp(
                             val isVoiceOnline = isNetworkAvailable()
                             val voiceStatusText = when {
                                 !isVoiceOnline -> "🌐 Connect Internet — 100% Online Human Voice Only"
-                                elevenLabsInput.isNotBlank() -> "🎙️ ElevenLabs Studio v2 Active (${OnlineHumanVoiceCatalog.getVoiceDisplayName(selectedElevenMale, false)} / ${OnlineHumanVoiceCatalog.getVoiceDisplayName(selectedElevenFemale, true)})"
-                                activeGeminiKey.isNotBlank() -> "✨ Gemini 2.5 Studio Human Audio Active ($selectedGeminiMale / $selectedGeminiFemale)"
-                                else -> "☁️ Free Cloud Neural Human Voice Active"
+                                elevenLabsInput.isNotBlank() -> "🎙️ ElevenLabs Studio v2 + Edge Neural Active (${OnlineHumanVoiceCatalog.getVoiceDisplayName(selectedElevenMale, false)} / ${OnlineHumanVoiceCatalog.getVoiceDisplayName(selectedElevenFemale, true)})"
+                                else -> "✨ Edge Neural Studio HD Active (ZEE: PradeepNeural / ZHEE: NabanitaNeural)"
                             }
                             val voiceStatusColor = if (isVoiceOnline) Color(0xFF34D399) else Color(0xFFFBBF24)
 
