@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.sp
 import com.zeeai.companion.voice.NativeVoiceController
 import com.zeeai.companion.voice.NativeVoiceProfile
 import com.zeeai.companion.voice.VoiceState
+import com.zeeai.companion.voice.WakeWordEventBus
+import com.zeeai.companion.voice.WakeWordForegroundService
 import com.zeeai.companion.ui.PhoneControlDualDashboard
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -88,6 +90,17 @@ fun PhoneControlScreen(
     fun executePhoneCommand(raw: String) {
         val clean = raw.trim()
         if (clean.isEmpty()) return
+
+        val lowerClean = clean.lowercase()
+        if (lowerClean in listOf("stop mic", "mic off", "mic bondho", "mic bondho koro", "stop listening", "মাইক বন্ধ", "মাইক বন্ধ করো")) {
+            WakeWordEventBus.setPhoneMicSessionDesired(false)
+            voiceController.stopListening(resumeWakeWord = false)
+            WakeWordForegroundService.stop(context)
+            liveVoiceText = ""
+            actionLogs.add(0, PhoneActionLog(command = clean, result = "মাইক বন্ধ করেছি বস।"))
+            voiceController.speak("মাইক বন্ধ করেছি বস।", voiceProfile, online = isNetworkAvailable())
+            return
+        }
 
         when (val outcome = phoneCommander.tryHandleCommand(clean)) {
             is PhoneCommandOutcome.Executed -> {
@@ -174,6 +187,7 @@ fun PhoneControlScreen(
     fun startPhoneControlMic() {
         liveVoiceText = ""
         voiceController.clearError()
+        WakeWordEventBus.setPhoneMicSessionDesired(true)
         voiceController.startContinuousListening(
             languageTag = voiceProfile.languageTag,
             preferOffline = false,
@@ -349,7 +363,9 @@ fun PhoneControlScreen(
                             return@IconButton
                         }
                         if (isMicLockedOn) {
-                            voiceController.stopListening()
+                            WakeWordEventBus.setPhoneMicSessionDesired(false)
+                            voiceController.stopListening(resumeWakeWord = false)
+                            WakeWordForegroundService.stop(context)
                             liveVoiceText = ""
                         } else {
                             startPhoneControlMic()
@@ -481,7 +497,7 @@ fun PhoneControlScreen(
                     .padding(10.dp)
             ) {
                 Text(
-                    "১০০% হিউম্যান ভয়েস চালানোর জন্য Settings -> API Keys থেকে Gemini API Key (Studio Audio: Charon/Kore) অথবা ElevenLabs Key (Adam/Daniel/Sarah) সেট করুন। কী ছাড়াও অনলাইন Cloud Neural Voice কাজ করবে।",
+                    "১০০% ন্যাচারাল Edge Neural Studio ভয়েস (ZEE: PradeepNeural / ZHEE: NabanitaNeural) ফ্রি অ্যাক্টিভ — Google-এর রোবটিক ভয়েস সম্পূর্ণ বন্ধ। চাইলে Settings-এ ElevenLabs Key যোগ করতে পারেন।",
                     color = Silver,
                     fontSize = 10.sp,
                     lineHeight = 15.sp
