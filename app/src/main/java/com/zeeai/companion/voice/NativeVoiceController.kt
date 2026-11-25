@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -69,128 +70,62 @@ class NativeVoiceController(
         }
     }
 
-    init {
-        tts = TextToSpeech(context.applicationContext) { status ->
-            ttsReady = (status == TextToSpeech.SUCCESS)
-            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {
-                    isTtsSpeaking = true
-                    _voiceState.value = VoiceState.SPEAKING
-                    onSpeakingStateChanged(true)
-                    // Pause active speech recognition so AI does not hear its own voice
-                    mainHandler.post {
-                        recognizer?.cancel()
-                    }
-                }
+    private var geminiApiKey: String = ""
+    private var elevenLabsApiKey: String = ""
+    private var isOnline: Boolean = true
 
-                override fun onDone(utteranceId: String?) {
-                    isTtsSpeaking = false
-                    onSpeakingStateChanged(false)
-                    // Resume listening automatically if Mic is locked on
-                    if (_isMicLockedOn.value) {
-                        _voiceState.value = VoiceState.LISTENING
-                        mainHandler.removeCallbacks(restartListeningRunnable)
-                        mainHandler.postDelayed(restartListeningRunnable, 250L)
-                    } else {
-                        _voiceState.value = VoiceState.IDLE
-                    }
-                }
-
-                @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) {
-                    isTtsSpeaking = false
-                    onSpeakingStateChanged(false)
-                    if (_isMicLockedOn.value) {
-                        _voiceState.value = VoiceState.LISTENING
-                        mainHandler.removeCallbacks(restartListeningRunnable)
-                        mainHandler.postDelayed(restartListeningRunnable, 250L)
-                    } else {
-                        _voiceState.value = VoiceState.IDLE
-                    }
-                }
-            })
-        }
+    fun setApiKeys(gemini: String, eleven: String, online: Boolean) {
+        this.geminiApiKey = gemini
+        this.elevenLabsApiKey = eleven
+        this.isOnline = online
     }
 
-    fun speak(text: String, profile: NativeVoiceProfile) {
+    val humanVoiceEngine = HumanVoiceEngine(
+        context = context,
+        onSpeechStart = {
+            isTtsSpeaking = true
+            _voiceState.value = VoiceState.SPEAKING
+            onSpeakingStateChanged(true)
+            mainHandler.post { recognizer?.cancel() }
+        },
+        onSpeechDone = {
+            isTtsSpeaking = false
+            onSpeakingStateChanged(false)
+            if (_isMicLockedOn.value) {
+                _voiceState.value = VoiceState.LISTENING
+                mainHandler.removeCallbacks(restartListeningRunnable)
+                mainHandler.postDelayed(restartListeningRunnable, 250L)
+            } else {
+                _voiceState.value = VoiceState.IDLE
+            }
+        }
+    )
+
+    init {
+        // HumanVoiceEngine handles all TTS playback reliably
+    }
+
+    fun speak(
+        text: String,
+        profile: NativeVoiceProfile,
+        online: Boolean = isOnline,
+        geminiKey: String = geminiApiKey,
+        elevenKey: String = elevenLabsApiKey
+    ) {
         if (text.isBlank()) return
-        if (!ttsReady) {
-            mainHandler.postDelayed({
-                if (ttsReady) speak(text, profile)
-            }, 350L)
-            return
-        }
-
-        stopSpeaking() // Instant interruption
-        val clean = text.replace(Regex("\\[.*?\\]"), "").trim()
-        if (clean.isEmpty()) return
-
-        // Script detection for offline synthesis
-        val hasBengali = clean.any { it in '\u0980'..'\u09FF' }
-        val hasHindi = clean.any { it in '\u0900'..'\u097F' }
-        val targetLocale = when {
-            hasBengali -> Locale.forLanguageTag("bn-BD")
-            hasHindi -> Locale.forLanguageTag("hi-IN")
-            else -> Locale.forLanguageTag(profile.languageTag)
-        }
-
-        var langStatus = tts?.setLanguage(targetLocale)
-        if (langStatus == TextToSpeech.LANG_MISSING_DATA || langStatus == TextToSpeech.LANG_NOT_SUPPORTED) {
-            if (hasBengali) {
-                langStatus = tts?.setLanguage(Locale.forLanguageTag("bn-IN"))
-                if (langStatus == TextToSpeech.LANG_MISSING_DATA || langStatus == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    langStatus = tts?.setLanguage(Locale.forLanguageTag("bn"))
-                }
-            }
-            if (langStatus == TextToSpeech.LANG_MISSING_DATA || langStatus == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts?.setLanguage(Locale.getDefault())
-            }
-        }
-
-        // Distinct acoustic vocal personas
-        tts?.setPitch(profile.pitch)
-        tts?.setSpeechRate(profile.rate)
-
-        try {
-            tts?.voices?.let { allVoices ->
-                val activeLang = tts?.voice?.locale?.language ?: targetLocale.language
-                val langVoices = allVoices.filter { it.locale.language.equals(activeLang, ignoreCase = true) }
-                val pool = if (langVoices.isNotEmpty()) langVoices else allVoices.toList()
-
-                // Prioritize offline / embedded voices
-                val offlineVoices = pool.filter { !it.isNetworkConnectionRequired }
-                val targetPool = if (offlineVoices.isNotEmpty()) offlineVoices else pool
-
-                val targetVoice = if (profile.isFemale) {
-                    targetPool.firstOrNull { v ->
-                        v.name.contains("female", ignoreCase = true) ||
-                        v.name.contains("-f-", ignoreCase = true) ||
-                        v.name.contains("fem", ignoreCase = true)
-                    } ?: targetPool.firstOrNull()
-                } else {
-                    targetPool.firstOrNull { v ->
-                        v.name.contains("male", ignoreCase = true) ||
-                        v.name.contains("-m-", ignoreCase = true) ||
-                        v.name.contains("masc", ignoreCase = true)
-                    } ?: targetPool.firstOrNull()
-                }
-
-                if (targetVoice != null) {
-                    tts?.voice = targetVoice
-                }
-            }
-        } catch (_: Exception) {}
-
-        val params = Bundle().apply {
-            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
-            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "zee_utt_${System.currentTimeMillis()}")
-        }
-
-        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, params, "zee_utt_${System.currentTimeMillis()}")
+        stopSpeaking()
+        val persona = if (profile.isFemale) VoicePersona.ZHEE_FEMALE else VoicePersona.ZEE_MALE
+        humanVoiceEngine.speakHuman(
+            rawText = text,
+            persona = persona,
+            isOnline = online,
+            geminiApiKey = geminiKey,
+            elevenLabsApiKey = elevenKey
+        )
     }
 
     fun stopSpeaking() {
-        tts?.stop()
+        humanVoiceEngine.stopSpeaking()
         isTtsSpeaking = false
         onSpeakingStateChanged(false)
         if (_isMicLockedOn.value) {
@@ -348,8 +283,9 @@ class NativeVoiceController(
 
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, activeLanguageTag)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, activeLanguageTag)
+                putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("bn-BD", "en-US", "bn-IN"))
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
@@ -401,38 +337,36 @@ class NativeVoiceController(
         return TtsVoicePackInfo(total, offline, hasBn, hasEn, engine)
     }
 
-    fun launchVoiceDataInstall(context: Context, isFemale: Boolean = false) {
-        val installIntent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            setPackage("com.google.android.tts")
-        }
-        val genericInstallIntent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        val ttsSettingsIntent = Intent("com.android.settings.TTS_SETTINGS").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        val voiceInputSettings = Intent("android.settings.VOICE_INPUT_SETTINGS").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-
+    fun openGoogleSpeechServicesPlayStore(context: Context) {
+        val marketUri = Uri.parse("market://details?id=com.google.android.tts")
+        val webUri = Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.tts")
         try {
-            context.startActivity(installIntent)
+            context.startActivity(Intent(Intent.ACTION_VIEW, marketUri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
         } catch (_: Exception) {
             try {
-                context.startActivity(genericInstallIntent)
+                context.startActivity(Intent(Intent.ACTION_VIEW, webUri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun launchVoiceDataInstall(context: Context, isFemale: Boolean = false) {
+        val intents = listOf(
+            Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA),
+            Intent("com.android.settings.TTS_SETTINGS"),
+            Intent(Settings.ACTION_SETTINGS)
+        )
+
+        for (intent in intents) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                return
             } catch (_: Exception) {
-                try {
-                    context.startActivity(ttsSettingsIntent)
-                } catch (_: Exception) {
-                    try {
-                        context.startActivity(voiceInputSettings)
-                    } catch (_: Exception) {
-                        context.startActivity(Intent(Settings.ACTION_SETTINGS).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        })
-                    }
-                }
+                // Continue to next fallback
             }
         }
     }
@@ -457,18 +391,25 @@ class NativeVoiceController(
         }
     }
 
-    fun testVoiceSample(isFemale: Boolean) {
-        val profile = if (isFemale) {
-            NativeVoiceProfile(languageTag = "bn-BD", pitch = 1.18f, rate = 0.96f, isFemale = true)
-        } else {
-            NativeVoiceProfile(languageTag = "bn-BD", pitch = 0.85f, rate = 1.02f, isFemale = false)
-        }
+    fun testVoiceSample(
+        isFemale: Boolean,
+        online: Boolean = isOnline,
+        geminiKey: String = geminiApiKey,
+        elevenKey: String = elevenLabsApiKey
+    ) {
+        val persona = if (isFemale) VoicePersona.ZHEE_FEMALE else VoicePersona.ZEE_MALE
         val testPhrase = if (isFemale) {
-            "হ্যালো! আমি ঝী। অফলাইন ভয়েস প্যাক সক্রিয় আছে এবং আমি সম্পূর্ণ প্রস্তুত।"
+            "হ্যালো! আমি ঝী। তোমার নতুন আল্ট্রা-ন্যাচারাল হিউম্যান ভয়েস সক্রিয় আছে। আমি সবসময় তোমার পাশে আছি।"
         } else {
-            "নমস্কার! আমি জী। অফলাইন ভয়েস প্যাক কাজ করছে। বলুন আমি কীভাবে সাহায্য করতে পারি।"
+            "নমস্কার! আমি জী। তোমার নতুন আল্ট্রা-ন্যাচারাল হিউম্যান ভয়েস সক্রিয় আছে। বলো, কীভাবে সাহায্য করতে পারি?"
         }
-        speak(testPhrase, profile)
+        humanVoiceEngine.speakHuman(
+            rawText = testPhrase,
+            persona = persona,
+            isOnline = online,
+            geminiApiKey = geminiKey,
+            elevenLabsApiKey = elevenKey
+        )
     }
 
     fun emergencyStop() {
@@ -479,7 +420,6 @@ class NativeVoiceController(
     fun shutdown() {
         emergencyStop()
         mainHandler.removeCallbacksAndMessages(null)
-        tts?.shutdown()
-        tts = null
+        humanVoiceEngine.release()
     }
 }
