@@ -839,7 +839,7 @@ class StarkSuperpowersEngine(
             val endpoint = if (base.endsWith("/chat/completions")) base else "$base/chat/completions"
             geminiClient.executeOpenAiCompatibleChat(
                 endpointUrl = endpoint,
-                apiKey = cleanKey.ifEmpty { "ollama" },
+                apiKey = cleanKey,
                 model = model.ifBlank { "gpt-4o-mini" },
                 systemInstruction = systemInstruction,
                 history = emptyList(),
