@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.lang.ref.WeakReference
 import java.util.Locale
 
 data class WakeWordDetection(
@@ -50,8 +51,18 @@ object WakeWordEventBus {
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
+    @Volatile
+    var isPausedForActiveVoice: Boolean = false
+        private set
+
+    internal var activeServiceRef: WeakReference<WakeWordForegroundService>? = null
+
     internal fun setRunning(running: Boolean) {
         _isRunning.value = running
+    }
+
+    internal fun setPaused(paused: Boolean) {
+        isPausedForActiveVoice = paused
     }
 
     internal fun emitDetection(detection: WakeWordDetection) {
@@ -63,32 +74,29 @@ class WakeWordForegroundService : Service() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var speechRecognizer: SpeechRecognizer? = null
-    private var isPausedForActiveVoice = false
     private var isStopping = false
     private var lastTriggerTimeMs = 0L
 
-    // Autonomous background execution & speech reply even when app is killed/closed
     private var phoneCommander: NativePhoneCommander? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var isTtsSpeaking = false
 
     private val restartRunnable = Runnable {
-        if (!isStopping && !isPausedForActiveVoice && !isTtsSpeaking) {
+        if (!isStopping && !WakeWordEventBus.isPausedForActiveVoice && !isTtsSpeaking) {
             startListeningCycle()
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        WakeWordEventBus.activeServiceRef = WeakReference(this)
         createNotificationChannel()
-
         phoneCommander = NativePhoneCommander(applicationContext)
 
         tts = TextToSpeech(applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 ttsReady = true
-                tts?.language = Locale.forLanguageTag("bn-BD")
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
                         isTtsSpeaking = true
@@ -105,54 +113,107 @@ class WakeWordForegroundService : Service() {
                         isTtsSpeaking = false
                         scheduleRestart(250L)
                     }
+
+                    override fun onError(utteranceId: String?, errorCode: Int) {
+                        isTtsSpeaking = false
+                        scheduleRestart(250L)
+                    }
                 })
             }
         }
     }
 
+    internal fun pauseImmediately() {
+        WakeWordEventBus.setPaused(true)
+        mainHandler.post { destroyRecognizer() }
+    }
+
+    internal fun resumeImmediately() {
+        WakeWordEventBus.setPaused(false)
+        scheduleRestart(400L)
+    }
+
+    internal fun stopImmediately() {
+        mainHandler.post { stopWakeWordService() }
+    }
+
     private fun speakReply(text: String, isFemale: Boolean = false) {
-        if (text.isBlank() || !ttsReady) return
+        val currentTts = tts
+        if (text.isBlank() || !ttsReady || currentTts == null) return
         val clean = text.replace(Regex("\\[.*?\\]"), "").trim()
         if (clean.isBlank()) return
 
         val hasBengali = clean.any { it in '\u0980'..'\u09FF' }
-        val targetLocale = if (hasBengali) Locale.forLanguageTag("bn-BD") else Locale.getDefault()
-
-        var langStatus = tts?.setLanguage(targetLocale)
-        if (langStatus == TextToSpeech.LANG_MISSING_DATA || langStatus == TextToSpeech.LANG_NOT_SUPPORTED) {
-            tts?.setLanguage(Locale.getDefault())
+        val online = isNetworkAvailable()
+        val allVoices = runCatching { currentTts.voices }.getOrNull().orEmpty()
+        val installedBnVoice = allVoices.any { v ->
+            v.locale.language.equals("bn", ignoreCase = true) &&
+                !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) &&
+                (online || !v.isNetworkConnectionRequired)
         }
 
-        tts?.setPitch(if (isFemale) 1.18f else 0.85f)
-        tts?.setSpeechRate(if (isFemale) 0.96f else 1.02f)
-
-        try {
-            tts?.voices?.let { allVoices ->
-                val activeLang = tts?.voice?.locale?.language ?: targetLocale.language
-                val langVoices = allVoices.filter { it.locale.language.equals(activeLang, ignoreCase = true) }
-                val targetPool = if (langVoices.isNotEmpty()) langVoices else allVoices.toList()
-                val targetVoice = if (isFemale) {
-                    targetPool.firstOrNull { it.name.contains("female", true) || it.name.contains("-f-", true) }
-                } else {
-                    targetPool.firstOrNull { it.name.contains("male", true) || it.name.contains("-m-", true) }
-                } ?: targetPool.firstOrNull()
-
-                if (targetVoice != null) tts?.voice = targetVoice
+        val textToSpeak: String
+        val targetLangPrefix: String
+        if (hasBengali && installedBnVoice) {
+            val bnLocale = listOf(Locale("bn", "BD"), Locale("bn", "IN"), Locale("bn")).firstOrNull { loc ->
+                runCatching { currentTts.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
             }
-        } catch (_: Exception) {}
+            if (bnLocale != null) {
+                currentTts.language = bnLocale
+                textToSpeak = clean
+                targetLangPrefix = "bn"
+            } else {
+                textToSpeak = BengaliToBanglish.toBanglish(clean)
+                currentTts.language = Locale.US
+                targetLangPrefix = "en"
+            }
+        } else {
+            textToSpeak = if (hasBengali) BengaliToBanglish.toBanglish(clean) else clean
+            val safeEn = listOf(Locale.US, Locale.UK, Locale("en", "IN"), Locale.getDefault()).firstOrNull { loc ->
+                runCatching { currentTts.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
+            } ?: Locale.getDefault()
+            currentTts.language = safeEn
+            targetLangPrefix = safeEn.language
+        }
 
+        currentTts.setPitch(if (isFemale) 1.12f else 0.92f)
+        currentTts.setSpeechRate(if (isFemale) 0.96f else 1.0f)
+
+        runCatching {
+            val pool = allVoices.filter { v ->
+                v.locale.language.equals(targetLangPrefix, ignoreCase = true) &&
+                    !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) &&
+                    (online || !v.isNetworkConnectionRequired)
+            }
+            val targetVoice = if (isFemale) {
+                pool.firstOrNull { it.name.contains("female", true) || it.name.contains("-f-", true) }
+            } else {
+                pool.firstOrNull { it.name.contains("male", true) || it.name.contains("-m-", true) }
+            } ?: pool.firstOrNull()
+            if (targetVoice != null) currentTts.voice = targetVoice
+        }
+
+        val uid = "fgs_${System.currentTimeMillis()}"
         val params = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
-            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "fgs_${System.currentTimeMillis()}")
+            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, uid)
         }
 
         isTtsSpeaking = true
         mainHandler.post { speechRecognizer?.cancel() }
-        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, params, "fgs_${System.currentTimeMillis()}")
+        val res = runCatching { currentTts.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, params, uid) }.getOrDefault(TextToSpeech.ERROR)
+        if (res != TextToSpeech.SUCCESS) {
+            isTtsSpeaking = false
+            scheduleRestart(300L)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Ensure Foreground notification is always attached
+        val hasMic = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
         val notification = buildNotification("Listening 24/7 for \"Hey Zee\", \"Zee\", or phone commands")
         val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
@@ -160,9 +221,15 @@ class WakeWordForegroundService : Service() {
             0
         }
 
-        try {
+        val foregroundOk = runCatching {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, serviceType)
-        } catch (_: Exception) {}
+            true
+        }.getOrDefault(false)
+
+        if (!foregroundOk || !hasMic) {
+            stopWakeWordService()
+            return START_NOT_STICKY
+        }
 
         when (intent?.action) {
             ACTION_STOP -> {
@@ -170,37 +237,26 @@ class WakeWordForegroundService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_PAUSE -> {
-                isPausedForActiveVoice = true
+                WakeWordEventBus.setPaused(true)
                 destroyRecognizer()
                 return START_STICKY
             }
             ACTION_RESUME -> {
-                isPausedForActiveVoice = false
+                WakeWordEventBus.setPaused(false)
                 scheduleRestart(400L)
                 return START_STICKY
             }
         }
 
-        val hasMic = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (!hasMic) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
         isStopping = false
-        isPausedForActiveVoice = false
-
+        WakeWordEventBus.setPaused(false)
         WakeWordEventBus.setRunning(true)
         mainHandler.post { startListeningCycle() }
         return START_STICKY
     }
 
     private fun startListeningCycle() {
-        if (isStopping || isPausedForActiveVoice || isTtsSpeaking) return
+        if (isStopping || WakeWordEventBus.isPausedForActiveVoice || isTtsSpeaking) return
 
         destroyRecognizer()
 
@@ -277,8 +333,8 @@ class WakeWordForegroundService : Service() {
         if (now - lastTriggerTimeMs < WAKE_COOLDOWN_MS) return
 
         val normalized = rawTranscript.trim()
-        val zheeRegex = Regex("\\b(hey\\s+zhee|zhee|জি)\\b", RegexOption.IGNORE_CASE)
-        val zeeRegex = Regex("\\b(hey\\s+zee|zee)\\b", RegexOption.IGNORE_CASE)
+        val zheeRegex = Regex("""(?:^|[\s,।.!?])(?:hey\s+zhee|zhee|জি|ঝি)(?=$|[\s,।.!?])""", RegexOption.IGNORE_CASE)
+        val zeeRegex = Regex("""(?:^|[\s,।.!?])(?:hey\s+zee|zee)(?=$|[\s,।.!?])""", RegexOption.IGNORE_CASE)
 
         val zheeMatch = zheeRegex.find(normalized)
         val zeeMatch = zeeRegex.find(normalized)
@@ -290,12 +346,10 @@ class WakeWordForegroundService : Service() {
 
             lastTriggerTimeMs = now
 
-            // 1. Emit to EventBus if UI is open
             WakeWordEventBus.emitDetection(
                 WakeWordDetection(targetCharacterId = targetChar, trailingCommand = trailing)
             )
 
-            // 2. Autonomous Background Execution: works even if app is closed/killed!
             if (trailing.isNotBlank()) {
                 val commander = phoneCommander
                 val outcome = commander?.tryHandleCommand(trailing)
@@ -318,7 +372,6 @@ class WakeWordForegroundService : Service() {
                 speakReply(greeting, isFemale = targetChar == "zhee")
             }
         } else if (isFinal) {
-            // Direct phone command without saying "Hey Zee"
             val commander = phoneCommander
             val outcome = commander?.tryHandleCommand(normalized)
             if (outcome is PhoneCommandOutcome.Executed) {
@@ -332,7 +385,7 @@ class WakeWordForegroundService : Service() {
 
     private fun scheduleRestart(delayMs: Long) {
         mainHandler.removeCallbacks(restartRunnable)
-        if (!isStopping && !isPausedForActiveVoice && !isTtsSpeaking) {
+        if (!isStopping && !WakeWordEventBus.isPausedForActiveVoice && !isTtsSpeaking) {
             mainHandler.postDelayed(restartRunnable, delayMs)
         }
     }
@@ -350,14 +403,17 @@ class WakeWordForegroundService : Service() {
         isStopping = true
         destroyRecognizer()
         WakeWordEventBus.setRunning(false)
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        WakeWordEventBus.setPaused(false)
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         stopSelf()
     }
 
     override fun onDestroy() {
         isStopping = true
+        WakeWordEventBus.activeServiceRef = null
         destroyRecognizer()
         WakeWordEventBus.setRunning(false)
+        WakeWordEventBus.setPaused(false)
         tts?.shutdown()
         tts = null
         super.onDestroy()
@@ -428,33 +484,37 @@ class WakeWordForegroundService : Service() {
         const val ACTION_RESUME = "com.zeeai.companion.WAKE_RESUME"
 
         fun start(context: Context) {
+            val hasMic = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasMic) return
             val intent = Intent(context, WakeWordForegroundService::class.java).apply {
                 action = ACTION_START
             }
-            ContextCompat.startForegroundService(context, intent)
+            runCatching { ContextCompat.startForegroundService(context, intent) }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, WakeWordForegroundService::class.java).apply {
-                action = ACTION_STOP
+            WakeWordEventBus.activeServiceRef?.get()?.let {
+                it.stopImmediately()
+                return
             }
-            context.startService(intent)
+            if (WakeWordEventBus.isRunning.value) {
+                runCatching { context.stopService(Intent(context, WakeWordForegroundService::class.java)) }
+            }
         }
 
         fun pause(context: Context) {
             if (!WakeWordEventBus.isRunning.value) return
-            val intent = Intent(context, WakeWordForegroundService::class.java).apply {
-                action = ACTION_PAUSE
-            }
-            context.startService(intent)
+            WakeWordEventBus.setPaused(true)
+            WakeWordEventBus.activeServiceRef?.get()?.pauseImmediately()
         }
 
         fun resume(context: Context) {
             if (!WakeWordEventBus.isRunning.value) return
-            val intent = Intent(context, WakeWordForegroundService::class.java).apply {
-                action = ACTION_RESUME
-            }
-            context.startService(intent)
+            WakeWordEventBus.setPaused(false)
+            WakeWordEventBus.activeServiceRef?.get()?.resumeImmediately()
         }
     }
 }
