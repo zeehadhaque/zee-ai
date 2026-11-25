@@ -56,6 +56,13 @@ class HumanVoiceEngine(
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
+    // Fast timeout for Google Translate TTS so slow/blocked networks instantly cascade to Offline TTS
+    private val googleTtsHttpClient = OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .callTimeout(4, TimeUnit.SECONDS)
+        .build()
+
     private val offlineNeuralEngine = OfflineNeuralTtsEngine(appContext)
 
     @Volatile
@@ -298,7 +305,7 @@ class HumanVoiceEngine(
                     .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36")
                     .build()
 
-                val bytes = httpClient.newCall(req).execute().use { resp ->
+                val bytes = googleTtsHttpClient.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) null
                     else {
                         val ct = resp.header("Content-Type")
@@ -513,12 +520,17 @@ class HumanVoiceEngine(
             primaryAttemptOk = speakAndAwaitTts(tts, spokenText, persona, mySessionId)
         }
 
-        // Guaranteed emergency retry with Phonetic Banglish + device default locale & default engine voice
+        // Guaranteed emergency retry with Phonetic Banglish + device default locale & offline voice
         if (!primaryAttemptOk && sessionCounter.get() == mySessionId) {
             Log.w(TAG, "Primary local TTS failed, retrying clean default locale + Banglish fallback")
             val emergencyText = if (isBengali) BengaliToBanglish.toBanglish(text) else text
             val safeLocale = findBestEnglishOrDefaultLocale(tts)
-            runCatching { tts.language = safeLocale }
+            runCatching {
+                tts.language = safeLocale
+                val offlineEn = pickBestInstalledVoice(tts, safeLocale.language, persona, isOnline = false)
+                if (offlineEn != null) tts.voice = offlineEn
+                else tts.defaultVoice?.let { tts.voice = it }
+            }
             speakAndAwaitTts(tts, emergencyText, persona, mySessionId)
         }
     }
