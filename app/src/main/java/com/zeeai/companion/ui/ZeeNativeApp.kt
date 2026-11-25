@@ -84,8 +84,7 @@ import com.zeeai.companion.ui.theme.LuxuryPalette
 import com.zeeai.companion.ui.theme.ZeeLuxuryTheme
 import com.zeeai.companion.voice.NativeVoiceController
 import com.zeeai.companion.voice.NativeVoiceProfile
-import com.zeeai.companion.voice.OfflineVoiceCatalog
-import com.zeeai.companion.voice.OfflineVoicePackDownloader
+import com.zeeai.companion.voice.OnlineHumanVoiceCatalog
 import com.zeeai.companion.voice.WakeWordEventBus
 import com.zeeai.companion.voice.WakeWordForegroundService
 import com.zeeai.companion.voice.ZeeVoiceInputController
@@ -415,9 +414,11 @@ fun ZeeNativeApp(
 
     val activeGeminiKey = keyVault.getKey("gemini_api_key")
     val activeElevenLabsKey = keyVault.getKey("elevenlabs_api_key")
-    val isAppOnline = !forceOfflineMode && isNetworkAvailable()
-    LaunchedEffect(activeGeminiKey, activeElevenLabsKey, isAppOnline) {
-        voiceController.setApiKeys(activeGeminiKey, activeElevenLabsKey, isAppOnline)
+    val isVoiceOnline = isNetworkAvailable()
+    val isAppOnline = !forceOfflineMode && isVoiceOnline
+    LaunchedEffect(activeGeminiKey, activeElevenLabsKey, isVoiceOnline) {
+        voiceController.setApiKeys(activeGeminiKey, activeElevenLabsKey, isVoiceOnline)
+        voiceController.updateOnlineVoiceConfig(OnlineHumanVoiceCatalog.loadConfig(keyVault))
     }
 
     LaunchedEffect(voiceInputController, voiceController) {
@@ -883,7 +884,7 @@ fun ZeeNativeApp(
                             DrawerActionItem("Permissions Hub (8 Bridges)", "🔐", selected = activeTab == "permissions_hub") {
                                 activeTab = "permissions_hub"; scope.launch { drawerState.close() }
                             }
-                            DrawerActionItem("Offline Gemma & Neural Voices", "🧠", selected = activeTab == "models") {
+                            DrawerActionItem("Offline Gemma AI Models", "🧠", selected = activeTab == "models") {
                                 activeTab = "models"; scope.launch { drawerState.close() }
                             }
                             DrawerActionItem("API Keys & Keystore Vault", "🔑", selected = activeTab == "settings") {
@@ -1704,205 +1705,7 @@ fun ZeeNativeApp(
                                 }
                             }
 
-                            // Offline Voice Packs (ZEE Male & ZHEE Female) Direct In-App Manager Card
-                            item {
-                                val downloader = remember { OfflineVoicePackDownloader(context) }
-                                var refreshVoicePacks by remember { mutableStateOf(0) }
-                                val installedCount = remember(refreshVoicePacks) { OfflineVoiceCatalog.countInstalledPacks(context) }
-                                var activeDownloadingPackId by remember { mutableStateOf<String?>(null) }
-                                var downloadProgressPct by remember { mutableStateOf(0) }
-                                var downloadStatusText by remember { mutableStateOf("") }
-                                var voiceActionFeedback by remember { mutableStateOf("") }
-
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(CardSurface, RoundedCornerShape(14.dp))
-                                        .border(1.dp, ElectricBlue.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
-                                        .padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            "🗣️ Offline Neural Voices (ZEE & ZHEE)",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            if (installedCount > 0) "✓ $installedCount টি ইনস্টল্ড" else "⚠️ প্যাক প্রয়োজন",
-                                            color = if (installedCount > 0) Color(0xFF34D399) else Color(0xFFFBBF24),
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-
-                                    Text(
-                                        "ইন্টারনেট বা প্লে-স্টোর ছাড়াই সরাসরি ZEE (Male) ও ZHEE (Female)-এর জন্য ১০০% অফলাইন হাই-কোয়ালিটি নিউরাল ভয়েস ডাউনলোড করুন।",
-                                        color = Silver,
-                                        fontSize = 11.sp
-                                    )
-
-                                    if (voiceActionFeedback.isNotBlank()) {
-                                        Text(
-                                            voiceActionFeedback,
-                                            color = Color(0xFF38BDF8),
-                                            fontSize = 11.sp
-                                        )
-                                    }
-
-                                    // Render each pack
-                                    OfflineVoiceCatalog.packs.forEach { pack ->
-                                        val isInstalled = remember(refreshVoicePacks, pack.id) {
-                                            OfflineVoiceCatalog.isInstalled(context, pack.id)
-                                        }
-                                        val isDownloading = activeDownloadingPackId == pack.id
-
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(Color(0xFF0F172A), RoundedCornerShape(10.dp))
-                                                .border(
-                                                    1.dp,
-                                                    if (isInstalled) Color(0xFF10B981).copy(alpha = 0.6f) else Color(0xFF334155),
-                                                    RoundedCornerShape(10.dp)
-                                                )
-                                                .padding(10.dp),
-                                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(pack.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                                                    Text(pack.subtitle, color = Silver.copy(alpha = 0.8f), fontSize = 10.sp)
-                                                }
-                                                Text(
-                                                    "${pack.sizeMb} MB",
-                                                    color = Cyan,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-
-                                            if (isDownloading) {
-                                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                    LinearProgressIndicator(
-                                                        progress = { downloadProgressPct / 100f },
-                                                        modifier = Modifier.fillMaxWidth().height(6.dp),
-                                                        color = ElectricBlue,
-                                                        trackColor = Color(0xFF1E293B)
-                                                    )
-                                                    Text(
-                                                        "$downloadStatusText ($downloadProgressPct%)",
-                                                        color = Color(0xFF38BDF8),
-                                                        fontSize = 10.sp
-                                                    )
-                                                }
-                                            } else {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    if (isInstalled) {
-                                                        Text(
-                                                            "✓ Installed & Active",
-                                                            color = Color(0xFF34D399),
-                                                            fontSize = 11.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            modifier = Modifier.weight(1f)
-                                                        )
-                                                        OutlinedButton(
-                                                            onClick = {
-                                                                downloader.deletePack(pack.id)
-                                                                refreshVoicePacks++
-                                                                voiceActionFeedback = "${pack.title} মুছে ফেলা হয়েছে।"
-                                                            },
-                                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444))
-                                                        ) {
-                                                            Text("🗑️ Delete", fontSize = 10.sp)
-                                                        }
-                                                    } else {
-                                                        Button(
-                                                            onClick = {
-                                                                activeDownloadingPackId = pack.id
-                                                                downloadProgressPct = 1
-                                                                downloadStatusText = "Connecting..."
-                                                                scope.launch(Dispatchers.IO) {
-                                                                    val res = downloader.downloadAndInstallPack(pack) { pct, txt ->
-                                                                        scope.launch(Dispatchers.Main) {
-                                                                            downloadProgressPct = pct
-                                                                            downloadStatusText = txt
-                                                                        }
-                                                                    }
-                                                                    scope.launch(Dispatchers.Main) {
-                                                                        activeDownloadingPackId = null
-                                                                        if (res.isSuccess) {
-                                                                            refreshVoicePacks++
-                                                                            voiceActionFeedback = "✓ ${pack.title} সফলভাবে ইনস্টল হয়েছে!"
-                                                                        } else {
-                                                                            voiceActionFeedback = "ডাউনলোড ত্রুটি: ${res.exceptionOrNull()?.message}"
-                                                                        }
-                                                                    }
-                                                                }
-                                                            },
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                                                            enabled = activeDownloadingPackId == null
-                                                        ) {
-                                                            Text("📥 Download (${pack.sizeMb} MB)", fontSize = 11.sp)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Voice Test Buttons
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                voiceActionFeedback = "ZEE (Male) হিউম্যান ভয়েস টেস্ট চলছে..."
-                                                voiceController.testVoiceSample(isFemale = false)
-                                            },
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text("🔊 Test ZEE Male", fontSize = 11.sp)
-                                        }
-                                        OutlinedButton(
-                                            onClick = {
-                                                voiceActionFeedback = "ZHEE (Female) হিউম্যান ভয়েস টেস্ট চলছে..."
-                                                voiceController.testVoiceSample(isFemale = true)
-                                            },
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text("🔊 Test ZHEE Female", fontSize = 11.sp)
-                                        }
-                                    }
-
-                                    // Settings link
-                                    TextButton(
-                                        onClick = {
-                                            voiceController.openTtsSettings(context)
-                                        },
-                                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                                    ) {
-                                        Text("⚙️ Android System TTS Settings", color = Silver, fontSize = 11.sp)
-                                    }
-                                }
-                            }
-
-                            // Catalog Models
+                            // Catalog Models (Offline Voice Engine permanently removed; 100% Online Human Voice active)
                             items(models, key = { it.spec.id }) { item ->
                                 Column(
                                     modifier = Modifier
@@ -2509,31 +2312,159 @@ fun ZeeNativeApp(
 
                             HorizontalDivider(color = Color(0xFF1E293B))
 
-                            Text("Ultra-Natural Human Voice (ElevenLabs)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                            Text("Optional ElevenLabs Multilingual v2 key for cinema-grade human voice. If empty, ZEE AI uses Gemini 2.5 Native Audio or 100% Offline Neural Voice.", color = Silver, fontSize = 11.sp)
+                            Text("100% Online Human Voice Studio (ElevenLabs & Gemini 2.5)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("Pure online studio human voices for ZEE (Male) & ZHEE (Female). Cascade: ElevenLabs -> Gemini 2.5 Studio Audio -> Cloud Neural Voice.", color = Silver, fontSize = 11.sp)
 
                             var elevenLabsInput by remember { mutableStateOf(keyVault.getKey("elevenlabs_api_key")) }
+                            var selectedElevenMale by remember {
+                                mutableStateOf(keyVault.getKey(OnlineHumanVoiceCatalog.KEY_ELEVEN_MALE_ID).ifBlank { OnlineHumanVoiceCatalog.DEFAULT_ELEVEN_MALE_ID })
+                            }
+                            var selectedElevenFemale by remember {
+                                mutableStateOf(keyVault.getKey(OnlineHumanVoiceCatalog.KEY_ELEVEN_FEMALE_ID).ifBlank { OnlineHumanVoiceCatalog.DEFAULT_ELEVEN_FEMALE_ID })
+                            }
+                            var selectedGeminiMale by remember {
+                                mutableStateOf(keyVault.getKey(OnlineHumanVoiceCatalog.KEY_GEMINI_MALE_VOICE).ifBlank { OnlineHumanVoiceCatalog.DEFAULT_GEMINI_MALE_VOICE })
+                            }
+                            var selectedGeminiFemale by remember {
+                                mutableStateOf(keyVault.getKey(OnlineHumanVoiceCatalog.KEY_GEMINI_FEMALE_VOICE).ifBlank { OnlineHumanVoiceCatalog.DEFAULT_GEMINI_FEMALE_VOICE })
+                            }
+                            var syncedAccountVoices by remember { mutableStateOf<List<com.zeeai.companion.voice.ElevenLabsVoicePreset>>(emptyList()) }
+                            var voiceStudioMsg by remember { mutableStateOf("") }
+
+                            fun persistAndSyncVoiceConfig() {
+                                val cfg = com.zeeai.companion.voice.OnlineVoiceConfig(
+                                    elevenLabsMaleId = selectedElevenMale,
+                                    elevenLabsFemaleId = selectedElevenFemale,
+                                    geminiMaleVoice = selectedGeminiMale,
+                                    geminiFemaleVoice = selectedGeminiFemale
+                                )
+                                keyVault.saveKey(OnlineHumanVoiceCatalog.KEY_ELEVEN_MALE_ID, selectedElevenMale)
+                                keyVault.saveKey(OnlineHumanVoiceCatalog.KEY_ELEVEN_FEMALE_ID, selectedElevenFemale)
+                                keyVault.saveKey(OnlineHumanVoiceCatalog.KEY_GEMINI_MALE_VOICE, selectedGeminiMale)
+                                keyVault.saveKey(OnlineHumanVoiceCatalog.KEY_GEMINI_FEMALE_VOICE, selectedGeminiFemale)
+                                voiceController.updateOnlineVoiceConfig(cfg)
+                            }
+
                             OutlinedTextField(
                                 value = elevenLabsInput,
                                 onValueChange = {
                                     elevenLabsInput = it
                                     keyVault.saveKey("elevenlabs_api_key", it.trim())
+                                    voiceController.setApiKeys(activeGeminiKey, it.trim(), !forceOfflineMode && isNetworkAvailable())
                                 },
                                 visualTransformation = PasswordVisualTransformation(),
                                 placeholder = { Text("xi-api-key...") },
-                                label = { Text("ElevenLabs API Key (Optional Cinema-Grade Voice)") },
+                                label = { Text("ElevenLabs API Key (Cinema-Grade Multilingual v2)") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true
                             )
 
-                            val isVoiceOnline = !forceOfflineMode && isNetworkAvailable()
-                            val voiceStatusText = when {
-                                !isVoiceOnline -> "📴 Offline Neural / HD Voice Active"
-                                elevenLabsInput.isNotBlank() -> "🎙️ Cinema-Grade ElevenLabs Human Voice Active"
-                                activeGeminiKey.isNotBlank() -> "✨ Gemini 2.5 Native Human Audio Active"
-                                else -> "📴 Offline Neural / HD Voice Active"
+                            Text("ZEE (Male) — ElevenLabs Cinema Voices", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            val malePool = (OnlineHumanVoiceCatalog.elevenLabsMaleVoices + syncedAccountVoices.filter { !it.isFemale }).distinctBy { it.id }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                malePool.forEach { preset ->
+                                    FilterChip(
+                                        selected = selectedElevenMale == preset.id,
+                                        onClick = {
+                                            selectedElevenMale = preset.id
+                                            persistAndSyncVoiceConfig()
+                                        },
+                                        label = { Text("${preset.name}", fontSize = 11.sp) }
+                                    )
+                                }
                             }
-                            val voiceStatusColor = if (isVoiceOnline && (elevenLabsInput.isNotBlank() || activeGeminiKey.isNotBlank())) Color(0xFF34D399) else Color(0xFF38BDF8)
+                            OutlinedTextField(
+                                value = selectedElevenMale,
+                                onValueChange = {
+                                    selectedElevenMale = it.trim()
+                                    persistAndSyncVoiceConfig()
+                                },
+                                label = { Text("Custom ZEE Male ElevenLabs Voice ID") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+
+                            Text("ZHEE (Female) — ElevenLabs Cinema Voices", color = LuxuryPalette.QuantumViolet, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            val femalePool = (OnlineHumanVoiceCatalog.elevenLabsFemaleVoices + syncedAccountVoices.filter { it.isFemale }).distinctBy { it.id }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                femalePool.forEach { preset ->
+                                    FilterChip(
+                                        selected = selectedElevenFemale == preset.id,
+                                        onClick = {
+                                            selectedElevenFemale = preset.id
+                                            persistAndSyncVoiceConfig()
+                                        },
+                                        label = { Text("${preset.name}", fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+
+                            if (elevenLabsInput.isNotBlank()) {
+                                OutlinedButton(
+                                    onClick = {
+                                        voiceStudioMsg = "Fetching your ElevenLabs account voices..."
+                                        scope.launch {
+                                            val res = voiceController.humanVoiceEngine.fetchElevenLabsAccountVoices(elevenLabsInput)
+                                            res.onSuccess { list ->
+                                                syncedAccountVoices = list
+                                                voiceStudioMsg = "Synced ${list.size} voices from ElevenLabs account!"
+                                            }.onFailure { err ->
+                                                voiceStudioMsg = "Sync failed: ${err.message}"
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("🔄 Sync My ElevenLabs Library Voices", fontSize = 11.sp)
+                                }
+                            }
+
+                            Text("Gemini 2.5 Studio Human Voices (Uses Gemini Key)", color = Color(0xFF34D399), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                OnlineHumanVoiceCatalog.geminiMaleVoices.forEach { gv ->
+                                    FilterChip(
+                                        selected = selectedGeminiMale == gv.name,
+                                        onClick = {
+                                            selectedGeminiMale = gv.name
+                                            persistAndSyncVoiceConfig()
+                                        },
+                                        label = { Text("♂ ${gv.name} (${gv.subtitle})", fontSize = 10.5.sp) }
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                OnlineHumanVoiceCatalog.geminiFemaleVoices.forEach { gv ->
+                                    FilterChip(
+                                        selected = selectedGeminiFemale == gv.name,
+                                        onClick = {
+                                            selectedGeminiFemale = gv.name
+                                            persistAndSyncVoiceConfig()
+                                        },
+                                        label = { Text("♀ ${gv.name} (${gv.subtitle})", fontSize = 10.5.sp) }
+                                    )
+                                }
+                            }
+
+                            val isVoiceOnline = isNetworkAvailable()
+                            val voiceStatusText = when {
+                                !isVoiceOnline -> "🌐 Connect Internet — 100% Online Human Voice Only"
+                                elevenLabsInput.isNotBlank() -> "🎙️ ElevenLabs Studio v2 Active (${OnlineHumanVoiceCatalog.getVoiceDisplayName(selectedElevenMale, false)} / ${OnlineHumanVoiceCatalog.getVoiceDisplayName(selectedElevenFemale, true)})"
+                                activeGeminiKey.isNotBlank() -> "✨ Gemini 2.5 Studio Human Audio Active ($selectedGeminiMale / $selectedGeminiFemale)"
+                                else -> "☁️ Free Cloud Neural Human Voice Active"
+                            }
+                            val voiceStatusColor = if (isVoiceOnline) Color(0xFF34D399) else Color(0xFFFBBF24)
 
                             Row(
                                 modifier = Modifier
@@ -2544,6 +2475,21 @@ fun ZeeNativeApp(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(voiceStatusText, color = voiceStatusColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            if (voiceStudioMsg.isNotBlank()) {
+                                Text(voiceStudioMsg, color = Cyan, fontSize = 11.sp)
+                            }
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { voiceController.testVoiceSample(isFemale = false, online = isNetworkAvailable(), geminiKey = activeGeminiKey, elevenKey = elevenLabsInput) },
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("🔊 Test ZEE Male", fontSize = 11.sp) }
+                                OutlinedButton(
+                                    onClick = { voiceController.testVoiceSample(isFemale = true, online = isNetworkAvailable(), geminiKey = activeGeminiKey, elevenKey = elevenLabsInput) },
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("🔊 Test ZHEE Female", fontSize = 11.sp) }
                             }
 
                             HorizontalDivider(color = Color(0xFF1E293B))
