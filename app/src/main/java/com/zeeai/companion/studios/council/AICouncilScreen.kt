@@ -264,7 +264,7 @@ fun AICouncilScreen(
 
         synthesizing = true
         verdictText = ""
-        val activeModel = keyVault.getKey("gemini_flash_model").removePrefix("models/").ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
+        val activeModel = keyVault.getKey("gemini_pro_model").removePrefix("models/").ifBlank { GeminiNativeClient.DEFAULT_PRO_MODEL }
         val backupGroq = keyVault.getKey("groq_api_key")
         statusText = "Synthesizing comparison & final verdict with $activeModel..."
 
