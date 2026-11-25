@@ -60,7 +60,6 @@ data class JarvisSettingsSnapshot(
     val proactiveTaskPrompt: Boolean = true,
     val proactiveMorningPrompt: Boolean = true,
     val proactiveBatteryAlert: Boolean = true,
-    val localFirstPrivacy: Boolean = false,
     val confirmRiskyActions: Boolean = true,
     val skillsEnabled: Boolean = true,
     val voiceFeedback: Boolean = true,
@@ -72,7 +71,7 @@ data class JarvisSettingsSnapshot(
     val emotionalAwareness: Boolean = true,
     val aiProviderPreset: String = "gemini",
     val aiBaseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
-    val aiCustomModel: String = "gemini-2.0-flash",
+    val aiCustomModel: String = "gemini-2.5-flash",
     val temperature: Float = 0.7f,
     val maxTokens: Int = 2048,
     val useSystemPrompt: Boolean = true,
@@ -83,7 +82,7 @@ data class JarvisSettingsSnapshot(
 class JarvisPreferences(context: Context) {
     companion object {
         val PROVIDER_PRESETS = listOf(
-            ProviderPreset("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.0-flash"),
+            ProviderPreset("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
             ProviderPreset("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
             ProviderPreset("openai", "OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"),
             ProviderPreset("groq", "Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
@@ -136,7 +135,6 @@ class JarvisPreferences(context: Context) {
             proactiveTaskPrompt = prefs.getBoolean("proactive_tasks", true),
             proactiveMorningPrompt = prefs.getBoolean("proactive_morning", true),
             proactiveBatteryAlert = prefs.getBoolean("proactive_battery", true),
-            localFirstPrivacy = prefs.getBoolean("local_first_privacy", false),
             confirmRiskyActions = prefs.getBoolean("confirm_risky", true),
             skillsEnabled = prefs.getBoolean("skills_enabled", true),
             voiceFeedback = prefs.getBoolean("voice_feedback", true),
@@ -148,7 +146,7 @@ class JarvisPreferences(context: Context) {
             emotionalAwareness = prefs.getBoolean("emotional_awareness", true),
             aiProviderPreset = prefs.getString("ai_preset", "gemini").orEmpty(),
             aiBaseUrl = prefs.getString("ai_base_url", "https://generativelanguage.googleapis.com/v1beta").orEmpty(),
-            aiCustomModel = prefs.getString("ai_custom_model", "gemini-2.0-flash").orEmpty(),
+            aiCustomModel = prefs.getString("ai_custom_model", "gemini-2.5-flash").orEmpty(),
             temperature = prefs.getFloat("temperature", 0.7f),
             maxTokens = prefs.getInt("max_tokens", 2048).coerceIn(256, 8192),
             useSystemPrompt = prefs.getBoolean("use_system_prompt", true),
@@ -184,7 +182,6 @@ class JarvisPreferences(context: Context) {
             putBoolean("proactive_tasks", next.proactiveTaskPrompt)
             putBoolean("proactive_morning", next.proactiveMorningPrompt)
             putBoolean("proactive_battery", next.proactiveBatteryAlert)
-            putBoolean("local_first_privacy", next.localFirstPrivacy)
             putBoolean("confirm_risky", next.confirmRiskyActions)
             putBoolean("skills_enabled", next.skillsEnabled)
             putBoolean("voice_feedback", next.voiceFeedback)
