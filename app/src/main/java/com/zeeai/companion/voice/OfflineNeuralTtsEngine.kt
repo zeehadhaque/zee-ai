@@ -10,54 +10,46 @@ import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class OfflineNeuralTtsEngine(
     private val context: Context,
-    private val onSpeechStart: () -> Unit,
-    private val onSpeechDone: () -> Unit
+    private val onSpeechStart: () -> Unit = {},
+    private val onSpeechDone: () -> Unit = {}
 ) {
     companion object {
         private const val TAG = "ZeeOfflineNeuralTTS"
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val engineMutex = Mutex()
 
     private var activeTts: OfflineTts? = null
     private var loadedPackId: String? = null
-    private var speakJob: Job? = null
 
     @Volatile
     private var activeTrack: AudioTrack? = null
 
-    /**
-     * টেক্সট বাংলা না ইংরেজি তা বুঝে ZEE (Male) বা ZHEE (Female)-এর উপযুক্ত ইনস্টল্ড প্যাক বাছাই করে
-     */
+    @Volatile
+    private var isStopped = false
+
     fun findBestInstalledPack(text: String, gender: VoiceGender): OfflineNeuralVoicePack? {
         val isBengali = text.any { it in '\u0980'..'\u09FF' }
         val preferredLang = if (isBengali) VoiceLang.BENGALI else VoiceLang.ENGLISH
 
-        // ১. Exact Gender + Exact Language
         OfflineVoiceCatalog.packs.firstOrNull {
             it.gender == gender && it.language == preferredLang && OfflineVoiceCatalog.isInstalled(context, it.id)
         }?.let { return it }
 
-        // ২. Same Language (অন্য জেন্ডার যদি ওটাই ডাউনলোড করা থাকে)
         OfflineVoiceCatalog.packs.firstOrNull {
             it.language == preferredLang && OfflineVoiceCatalog.isInstalled(context, it.id)
         }?.let { return it }
 
-        // ৩. যেকোনো ইনস্টল্ড প্যাক (ইংরেজি/বাংলিশের জন্য)
         return OfflineVoiceCatalog.packs.firstOrNull {
             it.gender == gender && OfflineVoiceCatalog.isInstalled(context, it.id)
         } ?: OfflineVoiceCatalog.packs.firstOrNull {
@@ -66,61 +58,69 @@ class OfflineNeuralTtsEngine(
     }
 
     /**
-     * 100% Offline Human Voice দিয়ে বাক্য-বাই-বাক্য স্ট্রিম করে কথা বলবে।
-     * কোনো প্যাক ইনস্টল না থাকলে false রিটার্ন করবে যাতে HD Local TTS ফলব্যাক নিতে পারে।
+     * Suspends through actual offline neural synthesis & PCM playback.
+     * Returns true ONLY if neural samples were actually synthesized and played,
+     * allowing callers to cleanly fall back to System HD TTS if false.
      */
-    fun speakOfflineNeural(
+    suspend fun speakOfflineNeural(
         rawText: String,
-        gender: VoiceGender
-    ): Boolean {
+        gender: VoiceGender,
+        notifyLifecycle: Boolean = false
+    ): Boolean = withContext(Dispatchers.Default) {
         val cleanText = sanitizeForHumanSpeech(rawText)
-        if (cleanText.isBlank()) return false
+        if (cleanText.isBlank()) return@withContext false
 
-        val pack = findBestInstalledPack(cleanText, gender) ?: return false
-        val files = OfflineVoiceCatalog.resolveInstalledFiles(context, pack.id) ?: return false
+        val pack = findBestInstalledPack(cleanText, gender) ?: return@withContext false
+        val files = OfflineVoiceCatalog.resolveInstalledFiles(context, pack.id) ?: return@withContext false
 
-        stop()
+        stopCurrentTrack()
+        isStopped = false
 
-        speakJob = scope.launch {
-            var notifiedStart = false
-            try {
-                val tts = ensureEngineLoaded(pack, files)
-                val sentences = splitIntoNaturalSentences(cleanText)
-                if (sentences.isEmpty()) return@launch
+        var notifiedStart = false
+        var anyPlayed = false
 
-                withContext(Dispatchers.Main) {
-                    notifiedStart = true
-                    onSpeechStart()
-                }
+        try {
+            val tts = ensureEngineLoaded(pack, files)
+            val sentences = splitIntoNaturalSentences(cleanText)
+            if (sentences.isEmpty()) return@withContext false
 
-                for ((index, sentence) in sentences.withIndex()) {
-                    if (!isActive) break
-                    val generated = tts.generate(
+            for ((index, sentence) in sentences.withIndex()) {
+                if (!currentCoroutineContext().isActive || isStopped) break
+                val generated = engineMutex.withLock {
+                    if (activeTts !== tts || isStopped) null
+                    else tts.generate(
                         text = sentence,
                         sid = pack.defaultSpeakerId,
                         speed = pack.defaultSpeed
                     )
-                    if (!isActive) break
-                    val samples = generated.samples
-                    if (samples != null && samples.isNotEmpty()) {
-                        playFloatSamples(samples, generated.sampleRate)
+                } ?: break
+
+                if (!currentCoroutineContext().isActive || isStopped) break
+                val samples = generated.samples
+                if (samples != null && samples.isNotEmpty()) {
+                    if (notifyLifecycle && !notifiedStart) {
+                        notifiedStart = true
+                        withContext(Dispatchers.Main) { onSpeechStart() }
                     }
-                    // কবিতা/শায়েরি বা বাক্যের মাঝে মানুষের মতো স্বাভাবিক নিঃশ্বাসের বিরতি
-                    if (index < sentences.lastIndex && isActive) {
-                        delay(170L)
-                    }
+                    playFloatSamples(samples, generated.sampleRate)
+                    anyPlayed = true
                 }
-            } catch (_: CancellationException) {
-                // ইউজার STOP চেপেছে
-            } catch (t: Throwable) {
-                Log.e(TAG, "Offline neural synthesis error: ${t.message}", t)
-            } finally {
-                if (notifiedStart) {
-                    withContext(Dispatchers.Main) { onSpeechDone() }
+
+                if (index < sentences.lastIndex && currentCoroutineContext().isActive && !isStopped) {
+                    delay(150L)
                 }
             }
+            anyPlayed
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Log.e(TAG, "Offline neural synthesis error: ${t.message}", t)
+            false
+        } finally {
+            if (notifyLifecycle && notifiedStart) {
+                withContext(Dispatchers.Main) { onSpeechDone() }
+            }
         }
-        return true
     }
 
     private suspend fun ensureEngineLoaded(
@@ -130,7 +130,7 @@ class OfflineNeuralTtsEngine(
         if (activeTts != null && loadedPackId == pack.id) {
             return@withLock activeTts!!
         }
-        releaseEngineInternal()
+        releaseEngineLocked()
 
         val vitsConfig = OfflineTtsVitsModelConfig(
             model = files.modelPath,
@@ -138,14 +138,14 @@ class OfflineNeuralTtsEngine(
             tokens = files.tokensPath,
             dataDir = files.dataDirPath,
             dictDir = "",
-            noiseScale = 0.667f,     // স্বাভাবিক মানুষের কণ্ঠের ভ্যারিয়েশন
-            noiseScaleW = 0.8f,      // প্রাকৃতিক রিদম ও টোন
-            lengthScale = 1.02f      // রোবটের মতো তাড়াহুড়ো না করে স্পষ্ট বলা
+            noiseScale = 0.667f,
+            noiseScaleW = 0.8f,
+            lengthScale = 1.02f
         )
 
         val modelConfig = OfflineTtsModelConfig().apply {
             vits = vitsConfig
-            numThreads = 4          // 12GB ফোনে সুপার-ফাস্ট জেনারেশন
+            numThreads = 4
             debug = false
             provider = "cpu"
         }
@@ -161,9 +161,6 @@ class OfflineNeuralTtsEngine(
         created
     }
 
-    /**
-     * Zero-distortion 32-bit Float PCM playback (Android API 26+ Native)
-     */
     private fun playFloatSamples(samples: FloatArray, sampleRate: Int) {
         val minBuf = AudioTrack.getMinBufferSize(
             sampleRate,
@@ -194,14 +191,14 @@ class OfflineNeuralTtsEngine(
             track.play()
             var offset = 0
             val chunk = 2048
-            while (offset < samples.size && activeTrack === track) {
+            while (offset < samples.size && activeTrack === track && !isStopped) {
                 val count = minOf(chunk, samples.size - offset)
                 val written = track.write(samples, offset, count, AudioTrack.WRITE_BLOCKING)
                 if (written <= 0) break
                 offset += written
             }
             if (activeTrack === track) {
-                track.stop()
+                runCatching { track.stop() }
             }
         } finally {
             runCatching { track.release() }
@@ -213,7 +210,7 @@ class OfflineNeuralTtsEngine(
         return text
             .split(Regex("""(?<=[।.!?])\s+|\n+"""))
             .map { it.trim() }
-            .filter { it.length >= 2 }
+            .filter { it.isNotEmpty() }
     }
 
     private fun sanitizeForHumanSpeech(raw: String): String {
@@ -227,9 +224,7 @@ class OfflineNeuralTtsEngine(
             .trim()
     }
 
-    fun stop() {
-        speakJob?.cancel()
-        speakJob = null
+    private fun stopCurrentTrack() {
         val track = activeTrack
         activeTrack = null
         runCatching {
@@ -239,12 +234,23 @@ class OfflineNeuralTtsEngine(
         }
     }
 
-    fun release() {
-        stop()
-        releaseEngineInternal()
+    fun stop() {
+        isStopped = true
+        stopCurrentTrack()
     }
 
-    private fun releaseEngineInternal() {
+    fun release() {
+        stop()
+        if (engineMutex.tryLock()) {
+            try {
+                releaseEngineLocked()
+            } finally {
+                engineMutex.unlock()
+            }
+        }
+    }
+
+    private fun releaseEngineLocked() {
         runCatching { activeTts?.release() }
         activeTts = null
         loadedPackId = null
