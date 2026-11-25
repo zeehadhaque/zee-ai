@@ -5,29 +5,17 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.Locale
-
-data class TtsVoicePackInfo(
-    val totalVoices: Int,
-    val offlineVoices: Int,
-    val hasBengali: Boolean,
-    val hasEnglish: Boolean,
-    val defaultEngine: String
-)
 
 data class NativeVoiceProfile(
     val languageTag: String, // "bn-BD", "en-US", "hi-IN", "ur-PK"
@@ -136,6 +124,10 @@ class NativeVoiceController(
         this.isOnline = online
     }
 
+    fun updateOnlineVoiceConfig(config: OnlineVoiceConfig) {
+        humanVoiceEngine.updateVoiceConfig(config)
+    }
+
     val humanVoiceEngine = HumanVoiceEngine(
         context = context,
         onSpeechStart = {
@@ -163,8 +155,16 @@ class NativeVoiceController(
                 _voiceState.value = VoiceState.IDLE
                 _statusHint.value = "Tap Mic to start voice phone control"
             }
+        },
+        onVoiceError = { msg ->
+            _lastError.value = msg
+            _statusHint.value = msg
         }
     )
+
+    fun getVoiceStatusInfo(online: Boolean = isOnline): OnlineVoiceStatusInfo {
+        return humanVoiceEngine.getVoiceStatusInfo(online, geminiApiKey, elevenLabsApiKey)
+    }
 
     fun speak(
         text: String,
@@ -174,7 +174,6 @@ class NativeVoiceController(
         elevenKey: String = elevenLabsApiKey
     ) {
         if (text.isBlank()) return
-        // Immediately lock mic restart BEFORE async TTS synthesis starts so 400ms timer can't steal mic!
         isTtsSpeaking = true
         isProcessingCommand = false
         _voiceState.value = VoiceState.SPEAKING
@@ -227,9 +226,6 @@ class NativeVoiceController(
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    /**
-     * Starts continuous always-on mic listening for Phone Control. Tapping Mic once locks it ON.
-     */
     fun startContinuousListening(
         languageTag: String,
         preferOffline: Boolean = false,
@@ -266,7 +262,6 @@ class NativeVoiceController(
         activeOnFinal = onFinal
         activeOnError = onError
 
-        // Pause 24/7 wake word synchronously via EventBus + Service so hardware mic is free immediately
         WakeWordForegroundService.pause(context)
 
         mainHandler.removeCallbacks(restartListeningRunnable)
@@ -383,7 +378,6 @@ class NativeVoiceController(
                         return
                     }
 
-                    // Transient silence / no match -> normal continuous restart
                     if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                         consecutiveFailureCount = 0
                         mainHandler.post {
@@ -398,13 +392,12 @@ class NativeVoiceController(
                         return
                     }
 
-                    // Language unsupported -> fall back to en-US immediately
                     if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
                         error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ||
                         error == SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT
                     ) {
                         forceEnglishLocaleFallback = true
-                        _lastError.value = "বাংলা স্পিচ প্যাক নেই — English voice mode-এ সুইচ হয়েছে"
+                        _lastError.value = "English voice recognition active"
                         mainHandler.post {
                             destroyRecognizerInternal()
                             if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
@@ -422,7 +415,6 @@ class NativeVoiceController(
                     _statusHint.value = errText
                     activeOnError?.invoke(errText)
 
-                    // On repeated hard failures (ERROR_CLIENT, ERROR_AUDIO, ERROR_NETWORK, etc.), escalate cleanly
                     if (consecutiveFailureCount == 1 && !useExplicitGoogleService && hasExplicitGoogleService()) {
                         useExplicitGoogleService = true
                     } else if (consecutiveFailureCount >= 3) {
@@ -439,7 +431,6 @@ class NativeVoiceController(
                     val retryDelay = when (error) {
                         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 700L
                         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
-                            // Offline network error on bn-BD -> try en-US fallback
                             forceEnglishLocaleFallback = true
                             800L
                         }
@@ -472,7 +463,6 @@ class NativeVoiceController(
                         activeOnFinal?.invoke(text)
                     }
 
-                    // Restart ONLY if TTS & async AI generation did not take over mic
                     if (_isMicLockedOn.value && !isTtsSpeaking && !isProcessingCommand) {
                         mainHandler.removeCallbacks(restartListeningRunnable)
                         mainHandler.postDelayed(restartListeningRunnable, 450L)
@@ -566,73 +556,16 @@ class NativeVoiceController(
         }
     }
 
-    fun getVoicePackInfo(): TtsVoicePackInfo = humanVoiceEngine.getVoicePackInfo()
-
-    fun openGoogleSpeechServicesPlayStore(context: Context) {
-        val marketUri = Uri.parse("market://details?id=com.google.android.tts")
-        val webUri = Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.tts")
-        try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, marketUri).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
-        } catch (_: Exception) {
-            runCatching {
-                context.startActivity(Intent(Intent.ACTION_VIEW, webUri).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                })
-            }
-        }
-    }
-
-    fun launchVoiceDataInstall(context: Context, isFemale: Boolean = false) {
-        val intents = listOf(
-            Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA),
-            Intent("com.android.settings.TTS_SETTINGS"),
-            Intent(Settings.ACTION_SETTINGS)
-        )
-
-        for (intent in intents) {
-            try {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                return
-            } catch (_: Exception) {
-                // Continue to next fallback
-            }
-        }
-    }
-
-    fun openTtsSettings(context: Context) {
-        val intent = Intent("com.android.settings.TTS_SETTINGS").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        try {
-            context.startActivity(intent)
-        } catch (_: Exception) {
-            val fallback = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            try {
-                context.startActivity(fallback)
-            } catch (_: Exception) {
-                context.startActivity(Intent(Settings.ACTION_SETTINGS).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                })
-            }
-        }
-    }
-
     fun testVoiceSample(
         isFemale: Boolean,
         online: Boolean = isOnline,
         geminiKey: String = geminiApiKey,
         elevenKey: String = elevenLabsApiKey
     ) {
-        val persona = if (isFemale) VoicePersona.ZHEE_FEMALE else VoicePersona.ZEE_MALE
         val testPhrase = if (isFemale) {
-            "হ্যালো বস! আমি ঝী। তোমার নতুন আল্ট্রা-ন্যাচারাল হিউম্যান ভয়েস সক্রিয় আছে। সবসময় তোমার পাশে আছি।"
+            "হ্যালো বস! আমি ঝী। এখন আমার হান্ড্রেড পারসেন্ট ন্যাচারাল অনলাইন হিউম্যান ভয়েস সক্রিয় আছে। বলুন কী সাহায্য করতে পারি?"
         } else {
-            "ইয়েস বস! আমি জী। তোমার নতুন আল্ট্রা-ন্যাচারাল হিউম্যান ভয়েস সক্রিয় আছে। বলো, কীভাবে সাহায্য করতে পারি?"
+            "ইয়েস বস! আমি জী। এখন আমার হান্ড্রেড পারসেন্ট ন্যাচারাল অনলাইন হিউম্যান ভয়েস সক্রিয় আছে। হুকুম করুন বস, কী করতে হবে?"
         }
         speak(
             text = testPhrase,
