@@ -58,11 +58,6 @@
         android:theme="@style/Theme.ZeeAI"
         tools:targetApi="35">
 
-        <!-- Xiaomi / HyperOS MediaPipe GPU Native Crash Prevention -->
-        <uses-native-library android:name="libOpenCL.so" android:required="false" />
-        <uses-native-library android:name="libOpenCL-car.so" android:required="false" />
-        <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
-
         <!-- Primary Launcher Activity -->
         <activity
             android:name=".MainActivity"
