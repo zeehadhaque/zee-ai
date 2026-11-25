@@ -117,7 +117,7 @@ class PersonalOfflineMemoryVault(context: Context) {
         val all = getAllMemories()
         val nick = getNickname()
         if (all.isEmpty() && nick.isNullOrBlank()) {
-            return "No saved memories yet — get to know your friend naturally."
+            return "No saved memories yet — assist your Boss naturally."
         }
 
         val queryWords = currentUserQuery.lowercase()
@@ -135,7 +135,7 @@ class PersonalOfflineMemoryVault(context: Context) {
 
         return buildString {
             if (!nick.isNullOrBlank()) {
-                appendLine("- Friend's Name: $nick")
+                appendLine("- Boss's Name: $nick")
             }
             for (m in combined) {
                 append("- [").append(m.category).append(" • ").append(m.timestamp).append("] ")
