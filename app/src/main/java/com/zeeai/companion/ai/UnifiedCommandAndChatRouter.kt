@@ -4,17 +4,19 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import com.zeeai.companion.automation.OfflineAutonomousPhoneController
-import com.zeeai.companion.offline.BestFriendPersona
-import com.zeeai.companion.offline.OfflineBrainCoordinator
-import com.zeeai.companion.offline.OfflineChatTurn
-import com.zeeai.companion.offline.OfflineModelResolver
 
-enum class ActiveEngineRoute { ONLINE, OFFLINE }
+enum class BestFriendPersona { ZEE, ZHEE }
+
+data class OfflineChatTurn(
+    val isUser: Boolean,
+    val text: String
+)
+
+enum class ActiveEngineRoute { ONLINE }
 
 data class RouterConfig(
-    val route: ActiveEngineRoute,
+    val route: ActiveEngineRoute = ActiveEngineRoute.ONLINE,
     val selectedOnlineModel: String,
-    val selectedOfflineModelPath: String?,
     val persona: BestFriendPersona,
     val geminiApiKey: String,
     val groqApiKey: String,
@@ -22,14 +24,12 @@ data class RouterConfig(
     val customProviderPreset: String = "gemini",
     val customBaseUrl: String = "",
     val customApiKey: String = "",
-    val hermesPersonaDirective: String = "",
-    val localFirstPrivacy: Boolean = false
+    val hermesPersonaDirective: String = ""
 )
 
 class UnifiedCommandAndChatRouter(
     private val context: Context,
     private val phoneController: OfflineAutonomousPhoneController,
-    private val offlineBrain: OfflineBrainCoordinator,
     private val geminiClient: GeminiNativeClient
 ) {
     fun isInternetAvailable(): Boolean {
@@ -48,27 +48,25 @@ class UnifiedCommandAndChatRouter(
         val cleanInput = userText.trim()
         if (cleanInput.isEmpty()) return ""
 
-        // 1. Instant offline hardware/app voice control (<50ms)
+        // 1. Instant local hardware/app phone control (<50ms)
         val instantAction = phoneController.tryInstantOfflineCommand(cleanInput)
         if (instantAction.handled) {
             onStreamingText(instantAction.reply)
             return instantAction.reply
         }
 
-        // 2. Local Offline Gemma Brain if requested, private lock active, or no internet
-        val shouldRunOffline = (config.route == ActiveEngineRoute.OFFLINE) || config.localFirstPrivacy || !isInternetAvailable()
-        if (shouldRunOffline) {
-            val activeModel = config.selectedOfflineModelPath
-                ?.takeIf { java.io.File(it).exists() }
-                ?: OfflineModelResolver.resolveActiveModel(context)?.filePath
-
-            return offlineBrain.processOfflineTurn(
-                userMessage = cleanInput,
-                persona = config.persona,
-                recentHistory = history,
-                installedModelPath = activeModel,
-                onStreamingUpdate = onStreamingText
-            )
+        // 2. Ensure Internet & API Key for online neural brain
+        if (!isInternetAvailable()) {
+            val offlineMsg = "⚠️ ইন্টারনেট সংযোগ নেই বস। সাধারণ ফোনের কমান্ড সরাসরি কাজ করবে, AI কথার জন্য ইন্টারনেট অন করুন।"
+            onStreamingText(offlineMsg)
+            return offlineMsg
+        }
+        val hasAnyKey = config.geminiApiKey.isNotBlank() || config.groqApiKey.isNotBlank() ||
+            config.openRouterApiKey.isNotBlank() || config.customApiKey.isNotBlank()
+        if (!hasAnyKey) {
+            val keyMsg = "⚠️ Settings থেকে Google AI Studio API Key দিন বস—অটো লেটেস্ট মডেল যুক্ত হয়ে যাবে।"
+            onStreamingText(keyMsg)
+            return keyMsg
         }
 
         val systemPrompt = buildOnlineHumanSystemPrompt(config.persona, config.hermesPersonaDirective)
@@ -130,20 +128,10 @@ class UnifiedCommandAndChatRouter(
                 finalReply
             },
             onFailure = { err ->
-                val fallbackOffline = OfflineModelResolver.resolveActiveModel(context)?.filePath
-                if (fallbackOffline != null) {
-                    offlineBrain.processOfflineTurn(
-                        userMessage = cleanInput,
-                        persona = config.persona,
-                        recentHistory = history,
-                        installedModelPath = fallbackOffline,
-                        onStreamingUpdate = onStreamingText
-                    )
-                } else {
-                    val notice = "⚠️ অনলাইন রিপ্লাই পাওয়া যায়নি (${err.message ?: "Network/Quota"})। অফলাইন বক্স থেকে ডাউনলোড করা Gemma মডেল সিলেক্ট করুন বস।"
-                    onStreamingText(notice)
-                    notice
-                }
+                val cleanMsg = err.message?.take(120) ?: "Network/API error"
+                val notice = "⚠️ AI উত্তর পাওয়া যায়নি ($cleanMsg)। Settings থেকে সঠিক Google AI Studio API Key যাচাই করুন বস।"
+                onStreamingText(notice)
+                notice
             }
         )
     }
