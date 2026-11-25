@@ -422,18 +422,15 @@ fun PhoneControlScreen(
             }
         }
 
-        // Offline Voice Packs (ZEE Male & ZHEE Female) Card
-        var voicePackInfo by remember { mutableStateOf(voiceController.getVoicePackInfo()) }
-        LaunchedEffect(Unit) {
-            kotlinx.coroutines.delay(900L)
-            voicePackInfo = voiceController.getVoicePackInfo()
-        }
-        var voiceStatusMsg by remember { mutableStateOf("") }
+        // 100% Online Human Voice Studio (ZEE Male & ZHEE Female) Card
+        val onlineNow = isNetworkAvailable()
+        val voiceStatusInfo = voiceController.getVoiceStatusInfo(online = onlineNow)
+        var voiceTestFeedback by remember { mutableStateOf("") }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(CardNavy, RoundedCornerShape(16.dp))
-                .border(1.dp, ElectricBlue.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                .border(1.dp, ElectricBlue.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -443,26 +440,31 @@ fun PhoneControlScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "🗣️ Offline Voice Packs (ZEE & ZHEE)",
+                    "🎙️ 100% Online Human Voice (ZEE & ZHEE)",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp
                 )
                 Text(
-                    if (voicePackInfo.hasBengali) "✓ Offline Ready" else "⚠️ Pack Needed",
-                    color = if (voicePackInfo.hasBengali) NeonEmerald else Color(0xFFFBBF24),
+                    if (voiceStatusInfo.isReady) "✓ Online HD Ready" else "⚠️ Net Required",
+                    color = if (voiceStatusInfo.isReady) NeonEmerald else Color(0xFFFBBF24),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
 
             Text(
-                "অফলাইনে কথা বলা ও ফোনের অ্যাকশন মুখে শোনার জন্য বাংলা ভয়েস প্যাক ডাউনলোড করুন:",
+                "Engine: ${voiceStatusInfo.activeProviderName}",
+                color = Cyan,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "ZEE (Male): ${voiceStatusInfo.maleVoiceLabel}  •  ZHEE (Female): ${voiceStatusInfo.femaleVoiceLabel}",
                 color = Silver,
                 fontSize = 11.sp
             )
 
-            // Voice Pack Download & Setup Guide Card
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -470,49 +472,16 @@ fun PhoneControlScreen(
                     .border(1.dp, Color(0xFF334155), RoundedCornerShape(10.dp))
                     .padding(10.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("💡 অফলাইন ভয়েস ডাউনলোড লিংক ও গাইড:", color = Color(0xFFFBBF24), fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    Text(
-                        "ZEE ও ZHEE অফলাইনে কথা বলার জন্য Android-এর Google Speech Services ব্যবহার করে:\n" +
-                        "১. নিচের '📥 ইনস্টল বাংলা ভয়েস' অথবা '🛍️ Play Store TTS'-এ ট্যাপ করুন।\n" +
-                        "২. Google TTS সেটিংসে গিয়ে 'Install voice data' ➔ 'Bengali (Bangladesh/India)' ডাউনলোড করুন।\n" +
-                        "৩. ডাউনলোড শেষ হলে '🔊 Test' বাটনে চাপ দিয়ে কণ্ঠ নিশ্চিত করুন।",
-                        color = Silver,
-                        fontSize = 10.sp,
-                        lineHeight = 15.sp
-                    )
-                }
+                Text(
+                    "১০০% হিউম্যান ভয়েস চালানোর জন্য Settings -> API Keys থেকে Gemini API Key (Studio Audio: Charon/Kore) অথবা ElevenLabs Key (Adam/Daniel/Sarah) সেট করুন। কী ছাড়াও অনলাইন Cloud Neural Voice কাজ করবে।",
+                    color = Silver,
+                    fontSize = 10.sp,
+                    lineHeight = 15.sp
+                )
             }
 
-            if (voiceStatusMsg.isNotBlank()) {
-                Text(voiceStatusMsg, color = Cyan, fontSize = 11.sp)
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        voiceStatusMsg = "Google TTS সেটিংস খুলছে... 'Install voice data' থেকে Bengali প্যাক ডাউনলোড করুন।"
-                        voiceController.launchVoiceDataInstall(context, isFemale = false)
-                        voicePackInfo = voiceController.getVoicePackInfo()
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
-                ) {
-                    Text("📥 ইনস্টল বাংলা ভয়েস", fontSize = 11.sp)
-                }
-                Button(
-                    onClick = {
-                        voiceStatusMsg = "Play Store খুলছে... Speech Services by Google ইনস্টল বা আপডেট করুন।"
-                        voiceController.openGoogleSpeechServicesPlayStore(context)
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
-                ) {
-                    Text("🛍️ Play Store TTS", fontSize = 11.sp)
-                }
+            if (voiceTestFeedback.isNotBlank()) {
+                Text(voiceTestFeedback, color = Cyan, fontSize = 11.sp)
             }
 
             Row(
@@ -521,8 +490,8 @@ fun PhoneControlScreen(
             ) {
                 OutlinedButton(
                     onClick = {
-                        voiceStatusMsg = "ZEE (Male) অফলাইন ভয়েস টেস্ট হচ্ছে..."
-                        voiceController.testVoiceSample(isFemale = false)
+                        voiceTestFeedback = "ZEE (Male) অনলাইন হিউম্যান ভয়েস টেস্ট হচ্ছে..."
+                        voiceController.testVoiceSample(isFemale = false, online = isNetworkAvailable())
                     },
                     modifier = Modifier.weight(1f)
                 ) {
@@ -530,22 +499,13 @@ fun PhoneControlScreen(
                 }
                 OutlinedButton(
                     onClick = {
-                        voiceStatusMsg = "ZHEE (Female) অফলাইন ভয়েস টেস্ট হচ্ছে..."
-                        voiceController.testVoiceSample(isFemale = true)
+                        voiceTestFeedback = "ZHEE (Female) অনলাইন হিউম্যান ভয়েস টেস্ট হচ্ছে..."
+                        voiceController.testVoiceSample(isFemale = true, online = isNetworkAvailable())
                     },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("🔊 Test ZHEE Female", fontSize = 11.sp)
                 }
-            }
-
-            TextButton(
-                onClick = {
-                    voiceController.openTtsSettings(context)
-                },
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Text("⚙️ Open System Text-to-Speech Settings", color = Silver.copy(alpha = 0.8f), fontSize = 11.sp)
             }
         }
 
@@ -702,12 +662,11 @@ fun PhoneControlScreen(
         }
 
         // Dual Phone Controls Dashboard (Offline Instant + Online Smart)
-        val installedVoiceCount = com.zeeai.companion.voice.OfflineVoiceCatalog.countInstalledPacks(context)
         PhoneControlDualDashboard(
             isAccessibilityActive = isAccessibilityActive || isAccessibilityConnected,
             isMicGranted = hasMic,
-            isInternetConnected = isNetworkAvailable(),
-            installedOfflineVoiceCount = installedVoiceCount,
+            isInternetConnected = onlineNow,
+            activeOnlineVoiceLabel = voiceStatusInfo.activeProviderName,
             lastActionFeedback = actionLogs.firstOrNull()?.result.orEmpty(),
             onRunCommand = { cmd -> executePhoneCommand(cmd) },
             onOpenAccessibilitySettings = {
