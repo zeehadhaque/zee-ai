@@ -648,8 +648,8 @@ fun AutonomousCoreSettingsScreen(
             }
         }
 
-        // 2. AI PROVIDER ENGINE & PARAMETERS (GEMINI / DEEPSEEK / OPENAI / GROQ / OLLAMA)
-        SectionTitle("AI PROVIDER PRESETS & ENGINE PARAMETERS", LuxuryPalette.IndigoLight)
+        // 2. ONLINE AI ENGINE PRESETS (AUTO GEMINI DISCOVERY / GROQ / DEEPSEEK / OPENAI)
+        SectionTitle("ONLINE AI ENGINE PRESETS", LuxuryPalette.IndigoLight)
         LuxuryGlassCard(glowColor = LuxuryPalette.IndigoLight) {
             Text("Provider Preset", color = LuxuryPalette.SilverText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
@@ -664,27 +664,35 @@ fun AutonomousCoreSettingsScreen(
                 }
             }
             Spacer(Modifier.height(10.dp))
-            LuxuryGlassTextField(
-                value = snap.aiBaseUrl,
-                onValueChange = { url -> jarvisCore.prefs.update { it.copy(aiBaseUrl = url) } },
-                label = "Endpoint Base URL",
-                placeholder = "https://api.openai.com/v1"
-            )
-            Spacer(Modifier.height(8.dp))
-            LuxuryGlassTextField(
-                value = snap.aiCustomModel,
-                onValueChange = { m -> jarvisCore.prefs.update { it.copy(aiCustomModel = m) } },
-                label = "Active Model ID",
-                placeholder = "gemini-2.0-flash / deepseek-chat / gpt-4o-mini"
-            )
-            Spacer(Modifier.height(8.dp))
-            LuxuryGlassTextField(
-                value = keyDraft,
-                onValueChange = { keyDraft = it; onSaveCustomApiKey(it) },
-                label = "Provider API Key (or configure Gemini/Groq in ZEE Key Vault)",
-                placeholder = "Paste API key...",
-                obscureText = true
-            )
+            if (snap.aiProviderPreset == "gemini") {
+                Text(
+                    "✨ Google Gemini Auto-Discovery Active: Key Vault-এ AI Studio API Key দিলেই লেটেস্ট মডেল অটো যুক্ত হয়ে যায় (ম্যানুয়াল মডেল সিলেক্ট করার দরকার নেই)।",
+                    color = LuxuryPalette.ElectricCyan,
+                    fontSize = 11.5.sp
+                )
+            } else {
+                LuxuryGlassTextField(
+                    value = snap.aiBaseUrl,
+                    onValueChange = { url -> jarvisCore.prefs.update { it.copy(aiBaseUrl = url) } },
+                    label = "Endpoint Base URL",
+                    placeholder = "https://api.openai.com/v1"
+                )
+                Spacer(Modifier.height(8.dp))
+                LuxuryGlassTextField(
+                    value = snap.aiCustomModel,
+                    onValueChange = { m -> jarvisCore.prefs.update { it.copy(aiCustomModel = m) } },
+                    label = "Provider Model ID",
+                    placeholder = "deepseek-chat / gpt-4o-mini"
+                )
+                Spacer(Modifier.height(8.dp))
+                LuxuryGlassTextField(
+                    value = keyDraft,
+                    onValueChange = { keyDraft = it; onSaveCustomApiKey(it) },
+                    label = "Provider API Key",
+                    placeholder = "Paste API key...",
+                    obscureText = true
+                )
+            }
             Spacer(Modifier.height(6.dp))
             TextButton(onClick = onOpenLegacyKeyVault) {
                 Text("Open ZEE AI Key Vault (Gemini, Groq, OpenRouter, ElevenLabs, HF) ->", color = LuxuryPalette.ElectricCyan, fontSize = 12.sp)
@@ -728,7 +736,7 @@ fun AutonomousCoreSettingsScreen(
             )
             LuxuryGlassSwitchTile(
                 title = "Neural Studio Human Voice",
-                subtitle = "100% Online Human Voices via ElevenLabs, Gemini 2.5 Studio & Cloud Neural for ZEE / ZHEE",
+                subtitle = "100% Online Human Voices via Edge Neural Studio HD & ElevenLabs for ZEE / ZHEE",
                 checked = snap.useNeuralVoice,
                 onCheckedChange = { b -> jarvisCore.prefs.update { it.copy(useNeuralVoice = b) } },
                 accentColor = LuxuryPalette.ElectricCyan,
