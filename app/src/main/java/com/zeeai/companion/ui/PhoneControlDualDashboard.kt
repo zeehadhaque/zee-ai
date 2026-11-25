@@ -19,7 +19,7 @@ fun PhoneControlDualDashboard(
     isAccessibilityActive: Boolean,
     isMicGranted: Boolean,
     isInternetConnected: Boolean,
-    installedOfflineVoiceCount: Int,
+    activeOnlineVoiceLabel: String = "100% Online Human Voice Ready",
     lastActionFeedback: String,
     onRunCommand: (String) -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
@@ -92,8 +92,8 @@ fun PhoneControlDualDashboard(
                 }
 
                 Text(
-                    text = "Offline Neural Voices Installed: $installedOfflineVoiceCount",
-                    color = Color(0xFF94A3B8),
+                    text = if (isInternetConnected) "🎙️ Voice Output: $activeOnlineVoiceLabel" else "🌐 Connect Internet for 100% Human Voice",
+                    color = if (isInternetConnected) Color(0xFF34D399) else Color(0xFFFBBF24),
                     fontSize = 11.sp
                 )
 
