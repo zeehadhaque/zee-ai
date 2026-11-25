@@ -53,7 +53,7 @@ data class ModelDiscoveryResult(
 
 class GeminiNativeClient {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(90, TimeUnit.SECONDS)
         .followRedirects(true)
@@ -63,29 +63,41 @@ class GeminiNativeClient {
     @Volatile
     private var activeCall: Call? = null
 
+    private val modelCooldownUntilMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val COOLDOWN_DURATION_MS = 10L * 60L * 1000L // ১০ মিনিট
+
+    fun isModelCoolingDown(model: String): Boolean {
+        val until = modelCooldownUntilMs[model] ?: return false
+        return System.currentTimeMillis() < until
+    }
+
+    fun markModelCooldown(model: String) {
+        modelCooldownUntilMs[model] = System.currentTimeMillis() + COOLDOWN_DURATION_MS
+    }
+
     companion object {
         val ALL_KNOWN_GEMINI_MODELS = listOf(
-            // Production Stable Workhorses (Guaranteed Active & Free-Tier in Google AI Studio)
             "gemini-2.0-flash",
             "gemini-1.5-flash",
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash-8b",
             "gemini-1.5-pro",
-            "gemini-2.0-flash-thinking-exp-01-21",
-            "gemini-2.0-pro-exp-02-05",
-            // Frontier Next-Gen Models (Auto-fallback to gemini-2.0-flash if not enabled on API key)
-            "gemini-3.8-flash",
-            "gemini-3.8-pro",
-            "gemini-4-hydrogen",
-            "gemini-4-carbon",
-            "gemini-4-neon",
-            "gemini-4-argon",
-            "gemini-3.0-flash",
-            "gemini-3.0-pro"
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash-8b"
         )
 
-        const val DEFAULT_FLASH_MODEL = "gemini-2.5-flash"
-        const val DEFAULT_PRO_MODEL = "gemini-2.5-flash"
+        const val DEFAULT_FLASH_MODEL = "gemini-2.0-flash"
+        const val DEFAULT_PRO_MODEL = "gemini-1.5-pro"
+
+        private val NON_CHAT_FRAGMENTS = listOf(
+            "embedding", "imagen", "veo", "aqa", "tts", "-image", "image-preview",
+            "robotics", "computer-use", "thinking-exp"
+        )
+
+        fun isValidChatModel(id: String): Boolean {
+            val lower = id.lowercase()
+            if (NON_CHAT_FRAGMENTS.any { lower.contains(it) }) return false
+            if (lower.contains("-exp")) return false
+            return lower.startsWith("gemini-") || lower.startsWith("gemma-")
+        }
     }
 
     // Ordered guaranteed-active Flash models FIRST (Free-Tier & High Quota)
@@ -93,14 +105,13 @@ class GeminiNativeClient {
         "gemini-2.0-flash",
         "gemini-1.5-flash",
         "gemini-2.0-flash-lite",
-        "gemini-1.5-flash-8b",
+        "gemini-1.5-flash-8b"
+    )
+
+    private val standardProPriority = listOf(
         "gemini-1.5-pro",
-        "gemini-2.0-flash-thinking-exp-01-21",
-        "gemini-2.0-pro-exp-02-05",
-        "gemini-3.8-flash",
-        "gemini-4-hydrogen",
-        "gemini-4-neon",
-        "gemini-3.0-flash"
+        "gemini-2.0-flash",
+        "gemini-1.5-flash"
     )
 
     fun cancelActive() {
@@ -151,7 +162,7 @@ class GeminiNativeClient {
                         }
                     }
 
-                    if (methods.contains("generateContent") && id != "gemini-2.5-flash" && id != "gemini-2.5-flash") {
+                    if (methods.contains("generateContent") && isValidChatModel(id)) {
                         discoveredList.add(DiscoveredModel(id, displayName, description, methods))
                     }
                 }
@@ -160,9 +171,12 @@ class GeminiNativeClient {
                     return@withContext Result.failure(IllegalStateException("No content generation models found for this API key."))
                 }
 
-                // Prioritize high-quota Free-Tier Flash models FIRST
+                // Prioritize user's requested models: gemini-3.8-flash for Fast and gemini-4-neon for Pro
                 val flashCandidates = discoveredList.filter { it.id.contains("flash", ignoreCase = true) }
-                val bestFlash = flashCandidates.firstOrNull { it.id == "gemini-2.0-flash" }?.id
+                val bestFlash = flashCandidates.firstOrNull { it.id == "gemini-3.8-flash" }?.id
+                    ?: flashCandidates.firstOrNull { it.id.contains("3.8-flash", ignoreCase = true) }?.id
+                    ?: flashCandidates.firstOrNull { it.id.contains("2.5-flash", ignoreCase = true) }?.id
+                    ?: flashCandidates.firstOrNull { it.id == "gemini-2.0-flash" }?.id
                     ?: flashCandidates.firstOrNull { it.id == "gemini-1.5-flash" }?.id
                     ?: flashCandidates.firstOrNull { it.id.contains("2.0-flash", ignoreCase = true) && !it.id.contains("lite") }?.id
                     ?: flashCandidates.firstOrNull { it.id.contains("1.5-flash", ignoreCase = true) && !it.id.contains("8b") }?.id
@@ -171,8 +185,12 @@ class GeminiNativeClient {
                     ?: flashCandidates.firstOrNull()?.id
                     ?: DEFAULT_FLASH_MODEL
 
-                val proCandidates = discoveredList.filter { it.id.contains("pro", ignoreCase = true) || it.id.contains("thinking", ignoreCase = true) }
-                val bestPro = proCandidates.firstOrNull { it.id.contains("2.0-pro", ignoreCase = true) }?.id
+                val proCandidates = discoveredList.filter { it.id.contains("pro", ignoreCase = true) || it.id.contains("neon", ignoreCase = true) || it.id.contains("thinking", ignoreCase = true) || it.id.contains("neo", ignoreCase = true) }
+                val bestPro = discoveredList.firstOrNull { it.id == "gemini-4-neon" }?.id
+                    ?: discoveredList.firstOrNull { it.id.contains("4-neon", ignoreCase = true) || it.id.contains("neo-4", ignoreCase = true) }?.id
+                    ?: discoveredList.firstOrNull { it.id.contains("3.8-pro", ignoreCase = true) }?.id
+                    ?: proCandidates.firstOrNull { it.id.contains("2.5-pro", ignoreCase = true) }?.id
+                    ?: proCandidates.firstOrNull { it.id.contains("2.0-pro", ignoreCase = true) }?.id
                     ?: proCandidates.firstOrNull { it.id.contains("1.5-pro", ignoreCase = true) }?.id
                     ?: proCandidates.firstOrNull { it.id.contains("thinking", ignoreCase = true) }?.id
                     ?: proCandidates.firstOrNull()?.id
@@ -198,7 +216,7 @@ class GeminiNativeClient {
             if (cleanSelected.isNotBlank() && !cleanSelected.contains("-exp") && cleanSelected != "gemini-exp-1206") {
                 candidateTestModels.add(cleanSelected)
             }
-            listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash").forEach {
+            listOf("gemini-3.8-flash", "gemini-4-neon", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash").forEach {
                 if (!candidateTestModels.contains(it)) candidateTestModels.add(it)
             }
             var lastErr = ""
@@ -286,9 +304,9 @@ class GeminiNativeClient {
     }
 
     /**
-     * Executes OpenAI-compatible chat completion for Groq or OpenRouter
+     * Executes true SSE line-by-line streaming for Groq or OpenRouter
      */
-    suspend fun executeOpenAiCompatibleChat(
+    suspend fun streamOpenAiCompatible(
         endpointUrl: String,
         apiKey: String,
         model: String,
@@ -301,7 +319,7 @@ class GeminiNativeClient {
         if (systemInstruction.isNotBlank()) {
             messages.put(JSONObject().put("role", "system").put("content", systemInstruction))
         }
-        for ((role, text) in history.takeLast(10)) {
+        for ((role, text) in history.takeLast(6)) {
             val mappedRole = if (role == "model" || role == "assistant") "assistant" else "user"
             messages.put(JSONObject().put("role", mappedRole).put("content", text))
         }
@@ -310,8 +328,8 @@ class GeminiNativeClient {
         val body = JSONObject().apply {
             put("model", model)
             put("messages", messages)
-            put("temperature", 0.7)
-            put("stream", false)
+            put("temperature", 0.75)
+            put("stream", true)
         }
 
         val reqBuilder = Request.Builder()
@@ -327,25 +345,80 @@ class GeminiNativeClient {
         val request = reqBuilder.post(body.toString().toRequestBody("application/json".toMediaType())).build()
 
         try {
+            val fullText = StringBuilder()
             client.newCall(request).execute().use { resp ->
-                val raw = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
-                    return@withContext Result.failure(IllegalStateException("Backup provider error (${resp.code}): ${raw.take(160)}"))
+                    val rawErr = resp.body?.string().orEmpty().take(180)
+                    return@withContext Result.failure(IllegalStateException("HTTP ${resp.code}: $rawErr"))
                 }
-                val json = JSONObject(raw)
-                val reply = json.optJSONArray("choices")
-                    ?.optJSONObject(0)
-                    ?.optJSONObject("message")
-                    ?.optString("content", "")
-                    .orEmpty()
-                    .trim()
-                onChunk(reply)
-                Result.success(reply)
+                val stream = resp.body?.byteStream()
+                    ?: return@withContext Result.failure(IllegalStateException("Empty response body"))
+                val reader = BufferedReader(InputStreamReader(stream, Charsets.UTF_8))
+                reader.useLines { lines ->
+                    for (line in lines) {
+                        val trimmed = line.trim()
+                        if (!trimmed.startsWith("data:")) continue
+                        val data = trimmed.removePrefix("data:").trim()
+                        if (data == "[DONE]" || data.isEmpty()) break
+                        val delta = runCatching {
+                            JSONObject(data)
+                                .optJSONArray("choices")
+                                ?.optJSONObject(0)
+                                ?.optJSONObject("delta")
+                                ?.optString("content", "")
+                                .orEmpty()
+                        }.getOrDefault("")
+                        if (delta.isNotEmpty()) {
+                            fullText.append(delta)
+                            onChunk(fullText.toString())
+                        }
+                    }
+                }
             }
+            val res = fullText.toString().trim()
+            if (res.isNotEmpty()) Result.success(res) else Result.failure(IllegalStateException("Empty stream reply"))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
+
+    suspend fun executeOpenAiCompatibleChat(
+        endpointUrl: String,
+        apiKey: String,
+        model: String,
+        systemInstruction: String,
+        history: List<Pair<String, String>>,
+        userPrompt: String,
+        onChunk: (accumulatedText: String) -> Unit
+    ): Result<String> = streamOpenAiCompatible(
+        endpointUrl = endpointUrl,
+        apiKey = apiKey,
+        model = model,
+        systemInstruction = systemInstruction,
+        history = history,
+        userPrompt = userPrompt,
+        onChunk = onChunk
+    )
+
+    suspend fun streamChatWithFallback(
+        geminiKey: String,
+        preferredModel: String,
+        systemInstruction: String,
+        userPrompt: String,
+        history: List<Pair<String, String>> = emptyList(),
+        groqKey: String = "",
+        openRouterKey: String = "",
+        onToken: (String) -> Unit
+    ): Result<String> = streamChat(
+        apiKey = geminiKey,
+        model = preferredModel,
+        systemInstruction = systemInstruction,
+        history = history,
+        userPrompt = userPrompt,
+        backupGroqKey = groqKey,
+        backupOpenRouterKey = openRouterKey,
+        onChunk = onToken
+    )
 
     suspend fun streamChat(
         apiKey: String,
@@ -364,7 +437,7 @@ class GeminiNativeClient {
 
         // Sanitize requested model name (remove prefix, handle deprecated models)
         val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-2.5-flash" || cleanRequested == "gemini-2.5-flash") {
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206") {
             DEFAULT_FLASH_MODEL
         } else {
             cleanRequested
@@ -377,10 +450,14 @@ class GeminiNativeClient {
             if (!modelsToTry.contains(m)) modelsToTry.add(m)
         }
 
+        // 10-Minute Failed-Model Cooldown: Skip rate-limited / dead models
+        val activeCandidates = modelsToTry.filter { !isModelCoolingDown(it) }
+        val finalModelsToTry = if (activeCandidates.isNotEmpty()) activeCandidates else modelsToTry
+
         var lastError: Throwable? = null
 
         if (apiKey.isNotBlank()) {
-            for (candidateModel in modelsToTry) {
+            for (candidateModel in finalModelsToTry) {
                 val res = streamChatSingleAttempt(
                     apiKey = apiKey,
                     model = candidateModel,
@@ -396,6 +473,9 @@ class GeminiNativeClient {
                 val err = res.exceptionOrNull()
                 lastError = err
                 val msg = err?.message.orEmpty()
+                if (msg.contains("429") || msg.contains("404") || msg.contains("RESOURCE_EXHAUSTED") || msg.contains("NOT_FOUND")) {
+                    markModelCooldown(candidateModel)
+                }
                 val isFatalAuth = msg.contains("API_KEY_INVALID") || msg.contains("API key not valid") ||
                         msg.contains("PERMISSION_DENIED") || msg.contains("HTTP 403") || msg.contains("HTTP 401")
                 if (isFatalAuth) {
@@ -404,9 +484,9 @@ class GeminiNativeClient {
             }
         }
 
-        // Seamless Failover: Groq Backup
+        // Seamless Failover: Groq True SSE Streaming Backup
         if (backupGroqKey.isNotBlank()) {
-            val groqRes = executeOpenAiCompatibleChat(
+            val groqRes = streamOpenAiCompatible(
                 endpointUrl = "https://api.groq.com/openai/v1/chat/completions",
                 apiKey = backupGroqKey,
                 model = "llama-3.3-70b-versatile",
@@ -418,9 +498,9 @@ class GeminiNativeClient {
             if (groqRes.isSuccess) return@withContext groqRes
         }
 
-        // Seamless Failover: OpenRouter Backup
+        // Seamless Failover: OpenRouter True SSE Streaming Backup
         if (backupOpenRouterKey.isNotBlank()) {
-            val openRouterRes = executeOpenAiCompatibleChat(
+            val openRouterRes = streamOpenAiCompatible(
                 endpointUrl = "https://openrouter.ai/api/v1/chat/completions",
                 apiKey = backupOpenRouterKey,
                 model = "meta-llama/llama-3.3-70b-instruct:free",
@@ -445,7 +525,7 @@ class GeminiNativeClient {
         onChunk: (accumulatedText: String) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
         val targetModel = model.removePrefix("models/").trim()
-        if (targetModel.isBlank() || targetModel == "gemini-2.5-flash" || targetModel == "gemini-2.5-flash") {
+        if (targetModel.isBlank() || targetModel == "gemini-exp-1206") {
             return@withContext Result.failure(IllegalStateException("Model $targetModel is not found or unsupported."))
         }
 
@@ -480,22 +560,33 @@ class GeminiNativeClient {
             )
         }
 
+        val isGemmaModel = targetModel.lowercase().startsWith("gemma")
         if (cleanHistory.isNotEmpty() && cleanHistory.last().first == "user") {
             val lastObj = contents.getJSONObject(contents.length() - 1)
             val partsArr = lastObj.getJSONArray("parts")
             val existingText = partsArr.getJSONObject(0).getString("text")
-            partsArr.put(0, JSONObject().put("text", "$existingText\n${userPrompt.trim()}"))
+            val combined = if (isGemmaModel && systemInstruction.isNotBlank() && cleanHistory.size == 1) {
+                "Instructions:\n$systemInstruction\n\nUser:\n$existingText\n${userPrompt.trim()}"
+            } else {
+                "$existingText\n${userPrompt.trim()}"
+            }
+            partsArr.put(0, JSONObject().put("text", combined))
         } else {
+            val userText = if (isGemmaModel && systemInstruction.isNotBlank() && cleanHistory.isEmpty()) {
+                "Instructions:\n$systemInstruction\n\nUser:\n${userPrompt.trim()}"
+            } else {
+                userPrompt.trim()
+            }
             contents.put(
                 JSONObject().apply {
                     put("role", "user")
-                    put("parts", JSONArray().put(JSONObject().put("text", userPrompt.trim())))
+                    put("parts", JSONArray().put(JSONObject().put("text", userText)))
                 }
             )
         }
 
         val bodyJson = JSONObject().apply {
-            if (systemInstruction.isNotBlank()) {
+            if (!isGemmaModel && systemInstruction.isNotBlank()) {
                 put(
                     "systemInstruction",
                     JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstruction.trim())))
@@ -503,7 +594,7 @@ class GeminiNativeClient {
             }
             put("contents", contents)
             put("generationConfig", JSONObject().put("temperature", 0.85))
-            if (enableGoogleSearch) {
+            if (!isGemmaModel && enableGoogleSearch) {
                 put("tools", JSONArray().put(JSONObject().put("googleSearch", JSONObject())))
             }
         }
@@ -526,6 +617,9 @@ class GeminiNativeClient {
                 if (!response.isSuccessful) {
                     val rawErr = response.body?.string().orEmpty().take(250)
                     val err = if (rawErr.isNotBlank()) rawErr else "HTTP ${response.code}"
+                    if (response.code == 429 || response.code == 404 || err.contains("RESOURCE_EXHAUSTED") || err.contains("NOT_FOUND")) {
+                        markModelCooldown(targetModel)
+                    }
                     return@withContext Result.failure(IllegalStateException("HTTP ${response.code}: $err"))
                 }
 
@@ -604,7 +698,7 @@ class GeminiNativeClient {
         }
 
         val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-2.5-flash" || cleanRequested == "gemini-2.5-flash") {
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206") {
             DEFAULT_FLASH_MODEL
         } else {
             cleanRequested
@@ -795,7 +889,7 @@ class GeminiNativeClient {
         backupGroqKey: String = ""
     ): Result<String> = withContext(Dispatchers.IO) {
         val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-2.5-flash" || cleanRequested == "gemini-2.5-flash") {
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206") {
             DEFAULT_FLASH_MODEL
         } else {
             cleanRequested
@@ -843,17 +937,25 @@ class GeminiNativeClient {
         temperature: Double
     ): Result<String> = withContext(Dispatchers.IO) {
         val targetModel = model.removePrefix("models/").trim()
+        val isGemmaModel = targetModel.lowercase().startsWith("gemma")
+        val finalUserPrompt = if (isGemmaModel && systemInstruction.isNotBlank()) {
+            "Instructions:\n$systemInstruction\n\nUser:\n$userPrompt"
+        } else {
+            userPrompt
+        }
         val bodyJson = JSONObject().apply {
-            put(
-                "systemInstruction",
-                JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstruction)))
-            )
+            if (!isGemmaModel && systemInstruction.isNotBlank()) {
+                put(
+                    "systemInstruction",
+                    JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemInstruction)))
+                )
+            }
             put(
                 "contents",
                 JSONArray().put(
                     JSONObject()
                         .put("role", "user")
-                        .put("parts", JSONArray().put(JSONObject().put("text", userPrompt)))
+                        .put("parts", JSONArray().put(JSONObject().put("text", finalUserPrompt)))
                 )
             )
             put("generationConfig", JSONObject().put("temperature", temperature))
@@ -990,7 +1092,7 @@ class GeminiNativeClient {
         }
 
         val cleanRequested = model.removePrefix("models/").trim()
-        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-2.5-flash" || cleanRequested == "gemini-2.5-flash") {
+        val primary = if (cleanRequested.isBlank() || cleanRequested == "gemini-exp-1206") {
             DEFAULT_FLASH_MODEL
         } else {
             cleanRequested
