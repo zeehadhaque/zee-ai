@@ -18,6 +18,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -30,11 +31,13 @@ import com.zeeai.companion.ai.BestFriendPersona
 import com.zeeai.companion.ai.GeminiNativeClient
 import com.zeeai.companion.ai.RouterConfig
 import com.zeeai.companion.ai.UnifiedCommandAndChatRouter
+import com.zeeai.companion.automation.JarvisScreenAgent
 import com.zeeai.companion.automation.NativePhoneCommander
 import com.zeeai.companion.automation.OfflineAutonomousPhoneController
 import com.zeeai.companion.automation.PhoneCommandOutcome
 import com.zeeai.companion.data.local.SecureKeyVault
 import com.zeeai.companion.jarvis.JarvisPreferences
+import com.zeeai.companion.jarvis.ZeeFloatingOverlayService
 import com.zeeai.companion.offline.OfflineConversationalBrain
 import com.zeeai.companion.offline.PersonalOfflineMemoryVault
 import kotlinx.coroutines.CoroutineScope
@@ -104,6 +107,8 @@ class WakeWordForegroundService : Service() {
     private var keyVault: SecureKeyVault? = null
     private var jarvisPrefs: JarvisPreferences? = null
     private var onlineVoiceEngine: HumanVoiceEngine? = null
+    private var jarvisAudioMicEngine: JarvisAudioMicEngine? = null
+    private var screenAgent: JarvisScreenAgent? = null
 
     @Volatile
     private var isTtsSpeaking = false
@@ -130,22 +135,33 @@ class WakeWordForegroundService : Service() {
         val memVault = PersonalOfflineMemoryVault(applicationContext)
         val offlineCtrl = OfflineAutonomousPhoneController(applicationContext, memVault)
         val gemini = GeminiNativeClient()
+        val commander = NativePhoneCommander(applicationContext)
 
         keyVault = vault
         jarvisPrefs = JarvisPreferences(applicationContext)
-        phoneCommander = NativePhoneCommander(applicationContext)
+        phoneCommander = commander
         offlinePhoneController = offlineCtrl
         geminiClient = gemini
         router = UnifiedCommandAndChatRouter(applicationContext, offlineCtrl, gemini)
+        jarvisAudioMicEngine = JarvisAudioMicEngine(gemini)
+        screenAgent = JarvisScreenAgent(applicationContext, gemini, commander)
 
         onlineVoiceEngine = HumanVoiceEngine(
             context = applicationContext,
             onSpeechStart = {
                 isTtsSpeaking = true
+                jarvisAudioMicEngine?.setPaused(true)
+                ZeeFloatingOverlayService.updateState(applicationContext, "SPEAKING", null)
                 mainHandler.post { destroyRecognizer() }
             },
             onSpeechDone = {
                 isTtsSpeaking = false
+                jarvisAudioMicEngine?.setPaused(false)
+                ZeeFloatingOverlayService.updateState(
+                    applicationContext,
+                    if (handsFreeDirectMode) "LISTENING" else "IDLE",
+                    if (handsFreeDirectMode) "কমান্ড বলুন বস..." else null
+                )
                 scheduleRestart(350L)
             }
         )
@@ -153,11 +169,13 @@ class WakeWordForegroundService : Service() {
 
     internal fun pauseImmediately() {
         WakeWordEventBus.setPaused(true)
+        jarvisAudioMicEngine?.setPaused(true)
         mainHandler.post { destroyRecognizer() }
     }
 
     internal fun resumeImmediately() {
         WakeWordEventBus.setPaused(false)
+        jarvisAudioMicEngine?.setPaused(false)
         scheduleRestart(400L)
     }
 
@@ -233,11 +251,13 @@ class WakeWordForegroundService : Service() {
             }
             ACTION_PAUSE -> {
                 WakeWordEventBus.setPaused(true)
+                jarvisAudioMicEngine?.setPaused(true)
                 destroyRecognizer()
                 return START_STICKY
             }
             ACTION_RESUME -> {
                 WakeWordEventBus.setPaused(false)
+                jarvisAudioMicEngine?.setPaused(false)
                 scheduleRestart(350L)
                 return START_STICKY
             }
@@ -247,9 +267,14 @@ class WakeWordForegroundService : Service() {
         WakeWordEventBus.setPaused(false)
         WakeWordEventBus.setRunning(true)
         if (isHandsFreeIntent) {
+            if (Settings.canDrawOverlays(this)) {
+                ZeeFloatingOverlayService.start(this)
+                ZeeFloatingOverlayService.updateState(this, "LISTENING", "হ্যান্ডস-ফ্রি JARVIS মাইক চালু হয়েছে বস")
+            }
             // Brief delay lets confirmation speech from foreground Activity finish cleanly before across-app mic listens
-            scheduleRestart(1400L)
+            scheduleRestart(1200L)
         } else {
+            jarvisAudioMicEngine?.stopCapture()
             mainHandler.post { startListeningCycle() }
         }
         return START_STICKY
@@ -276,6 +301,43 @@ class WakeWordForegroundService : Service() {
 
     private fun startListeningCycle() {
         if (isStopping || WakeWordEventBus.isPausedForActiveVoice || isTtsSpeaking) return
+
+        val geminiKey = keyVault?.getKey("gemini_api_key").orEmpty().trim()
+        if (handsFreeDirectMode && geminiKey.isNotBlank() && isNetworkAvailable()) {
+            destroyRecognizer()
+            val engine = jarvisAudioMicEngine
+            if (engine != null) {
+                if (engine.isRunning()) {
+                    engine.setPaused(false)
+                    ZeeFloatingOverlayService.updateState(applicationContext, "LISTENING", "কমান্ড বলুন বস...")
+                    return
+                }
+                ZeeFloatingOverlayService.updateState(applicationContext, "LISTENING", "পিওর JARVIS মাইক শুনছে বস...")
+                engine.startContinuousCapture(
+                    apiKeyProvider = { keyVault?.getKey("gemini_api_key").orEmpty().trim() },
+                    onRmsLevel = { },
+                    onStatus = { status ->
+                        if (status.contains("Analyzing", ignoreCase = true) || status.contains("Transcribing", ignoreCase = true)) {
+                            ZeeFloatingOverlayService.updateState(applicationContext, "THINKING", "বুঝতেছি বস...")
+                        }
+                    },
+                    onHearingStart = {
+                        ZeeFloatingOverlayService.updateState(applicationContext, "HEARING", "শুনছি বস...")
+                    },
+                    onTranscript = { spoken ->
+                        val clean = spoken.trim()
+                        if (clean.isNotBlank()) {
+                            executeHandsFreeCommand(clean)
+                        }
+                    },
+                    onError = { err ->
+                        val nm = getSystemService(NotificationManager::class.java)
+                        nm.notify(NOTIFICATION_ID, buildNotification("ZEE Hands-Free Mic", err.take(90)))
+                    }
+                )
+                return
+            }
+        }
 
         destroyRecognizer()
 
@@ -360,6 +422,7 @@ class WakeWordForegroundService : Service() {
         if (lower in listOf("stop mic", "mic off", "mic bondho", "mic bondho koro", "stop listening", "মাইক বন্ধ", "মাইক বন্ধ করো")) {
             handsFreeDirectMode = false
             WakeWordEventBus.setPhoneMicSessionDesired(false)
+            ZeeFloatingOverlayService.updateState(applicationContext, "IDLE", "মাইক বন্ধ হয়েছে বস")
             speakReply("মাইক বন্ধ করেছি বস।")
             mainHandler.postDelayed({ stopWakeWordService() }, 1800L)
             return
@@ -369,12 +432,14 @@ class WakeWordForegroundService : Service() {
         if (outcome is PhoneCommandOutcome.Executed) {
             val nm = getSystemService(NotificationManager::class.java)
             nm.notify(NOTIFICATION_ID, buildNotification("ZEE Hands-Free Mic ON", outcome.replyText))
+            ZeeFloatingOverlayService.updateState(applicationContext, "EXECUTING", outcome.replyText)
             speakReply(outcome.replyText)
             return
         }
         if (outcome is PhoneCommandOutcome.NeedsConfirmation) {
             val confirmReply = runCatching { outcome.confirmation.onConfirm() }
                 .getOrElse { outcome.confirmation.details }
+            ZeeFloatingOverlayService.updateState(applicationContext, "EXECUTING", confirmReply)
             speakReply(confirmReply)
             return
         }
@@ -384,29 +449,66 @@ class WakeWordForegroundService : Service() {
         val prefsSnap = jarvisPrefs?.state?.value
         val activeModel = vault.getKey("gemini_flash_model").removePrefix("models/").trim()
             .ifBlank { GeminiNativeClient.DEFAULT_FLASH_MODEL }
+        val geminiKey = vault.getKey("gemini_api_key").trim()
 
         serviceScope.launch {
-            val config = RouterConfig(
-                route = ActiveEngineRoute.ONLINE,
-                selectedOnlineModel = activeModel,
-                persona = if (handsFreeFemalePersona) BestFriendPersona.ZHEE else BestFriendPersona.ZEE,
-                geminiApiKey = vault.getKey("gemini_api_key"),
-                groqApiKey = vault.getKey("groq_api_key"),
-                openRouterApiKey = vault.getKey("openrouter_api_key"),
-                customProviderPreset = prefsSnap?.aiProviderPreset ?: "gemini",
-                customBaseUrl = prefsSnap?.aiBaseUrl.orEmpty(),
-                customApiKey = vault.getKey("custom_provider_api_key")
-            )
-            val reply = r.handleUserInput(
-                userText = spokenText,
-                config = config,
-                history = emptyList(),
-                onStreamingText = {}
-            )
-            val spoken = reply.substringBefore("\n\n⚡").trim().ifBlank { reply }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.notify(NOTIFICATION_ID, buildNotification("ZEE Hands-Free Mic ON", spoken.take(90)))
-            speakReply(spoken)
+            jarvisAudioMicEngine?.setPaused(true)
+            var didSpeak = false
+            try {
+                if (geminiKey.isNotBlank() && isNetworkAvailable() && JarvisScreenAgent.looksLikeScreenOrMultiStepTask(spokenText)) {
+                    ZeeFloatingOverlayService.updateState(applicationContext, "EXECUTING", "JARVIS অ্যাকশন চালাচ্ছে: ${spokenText.take(40)}")
+                    val agentRes = screenAgent?.executeGoal(spokenText, geminiKey) { stepMsg ->
+                        val nm = getSystemService(NotificationManager::class.java)
+                        nm.notify(NOTIFICATION_ID, buildNotification("JARVIS Screen Agent", stepMsg.take(90)))
+                        ZeeFloatingOverlayService.updateState(applicationContext, "EXECUTING", stepMsg.take(80))
+                    }
+                    val finalReply = agentRes?.getOrNull()
+                    if (!finalReply.isNullOrBlank()) {
+                        val nm = getSystemService(NotificationManager::class.java)
+                        nm.notify(NOTIFICATION_ID, buildNotification("ZEE Hands-Free Mic ON", finalReply.take(90)))
+                        ZeeFloatingOverlayService.updateState(applicationContext, "SPEAKING", finalReply.take(90))
+                        didSpeak = true
+                        speakReply(finalReply)
+                        return@launch
+                    }
+                }
+
+                ZeeFloatingOverlayService.updateState(applicationContext, "THINKING", "জবাব তৈরি হচ্ছে বস...")
+                val config = RouterConfig(
+                    route = ActiveEngineRoute.ONLINE,
+                    selectedOnlineModel = activeModel,
+                    persona = if (handsFreeFemalePersona) BestFriendPersona.ZHEE else BestFriendPersona.ZEE,
+                    geminiApiKey = geminiKey,
+                    groqApiKey = vault.getKey("groq_api_key"),
+                    openRouterApiKey = vault.getKey("openrouter_api_key"),
+                    customProviderPreset = prefsSnap?.aiProviderPreset ?: "gemini",
+                    customBaseUrl = prefsSnap?.aiBaseUrl.orEmpty(),
+                    customApiKey = vault.getKey("custom_provider_api_key")
+                )
+                val reply = r.handleUserInput(
+                    userText = spokenText,
+                    config = config,
+                    history = emptyList(),
+                    onStreamingText = {}
+                )
+                val spoken = reply.substringBefore("\n\n⚡").trim().ifBlank { reply }
+                val nm = getSystemService(NotificationManager::class.java)
+                nm.notify(NOTIFICATION_ID, buildNotification("ZEE Hands-Free Mic ON", spoken.take(90)))
+                if (spoken.isNotBlank()) {
+                    ZeeFloatingOverlayService.updateState(applicationContext, "SPEAKING", spoken.take(90))
+                    didSpeak = true
+                    speakReply(spoken)
+                }
+            } finally {
+                if (!didSpeak && !isTtsSpeaking) {
+                    jarvisAudioMicEngine?.setPaused(false)
+                    ZeeFloatingOverlayService.updateState(
+                        applicationContext,
+                        if (handsFreeDirectMode) "LISTENING" else "IDLE",
+                        if (handsFreeDirectMode) "কমান্ড বলুন বস..." else null
+                    )
+                }
+            }
         }
     }
 
@@ -482,6 +584,7 @@ class WakeWordForegroundService : Service() {
     private fun stopWakeWordService() {
         isStopping = true
         handsFreeDirectMode = false
+        jarvisAudioMicEngine?.stopCapture()
         destroyRecognizer()
         WakeWordEventBus.setRunning(false)
         WakeWordEventBus.setPaused(false)
@@ -493,6 +596,7 @@ class WakeWordForegroundService : Service() {
         isStopping = true
         handsFreeDirectMode = false
         WakeWordEventBus.activeServiceRef = null
+        jarvisAudioMicEngine?.stopCapture()
         destroyRecognizer()
         WakeWordEventBus.setRunning(false)
         WakeWordEventBus.setPaused(false)
