@@ -20,14 +20,13 @@ import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.zeeai.companion.MainActivity
 import com.zeeai.companion.automation.NativePhoneCommander
 import com.zeeai.companion.automation.PhoneCommandOutcome
+import com.zeeai.companion.data.local.SecureKeyVault
 import com.zeeai.companion.offline.OfflineConversationalBrain
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -78,8 +77,9 @@ class WakeWordForegroundService : Service() {
     private var lastTriggerTimeMs = 0L
 
     private var phoneCommander: NativePhoneCommander? = null
-    private var tts: TextToSpeech? = null
-    private var ttsReady = false
+    private var keyVault: SecureKeyVault? = null
+    private var onlineVoiceEngine: HumanVoiceEngine? = null
+    @Volatile
     private var isTtsSpeaking = false
 
     private val restartRunnable = Runnable {
@@ -93,34 +93,19 @@ class WakeWordForegroundService : Service() {
         WakeWordEventBus.activeServiceRef = WeakReference(this)
         createNotificationChannel()
         phoneCommander = NativePhoneCommander(applicationContext)
+        keyVault = runCatching { SecureKeyVault(applicationContext) }.getOrNull()
 
-        tts = TextToSpeech(applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                ttsReady = true
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {
-                        isTtsSpeaking = true
-                        mainHandler.post { speechRecognizer?.cancel() }
-                    }
-
-                    override fun onDone(utteranceId: String?) {
-                        isTtsSpeaking = false
-                        scheduleRestart(250L)
-                    }
-
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {
-                        isTtsSpeaking = false
-                        scheduleRestart(250L)
-                    }
-
-                    override fun onError(utteranceId: String?, errorCode: Int) {
-                        isTtsSpeaking = false
-                        scheduleRestart(250L)
-                    }
-                })
+        onlineVoiceEngine = HumanVoiceEngine(
+            context = applicationContext,
+            onSpeechStart = {
+                isTtsSpeaking = true
+                mainHandler.post { speechRecognizer?.cancel() }
+            },
+            onSpeechDone = {
+                isTtsSpeaking = false
+                scheduleRestart(250L)
             }
-        }
+        )
     }
 
     internal fun pauseImmediately() {
@@ -138,74 +123,20 @@ class WakeWordForegroundService : Service() {
     }
 
     private fun speakReply(text: String, isFemale: Boolean = false) {
-        val currentTts = tts
-        if (text.isBlank() || !ttsReady || currentTts == null) return
-        val clean = text.replace(Regex("\\[.*?\\]"), "").trim()
-        if (clean.isBlank()) return
-
-        val hasBengali = clean.any { it in '\u0980'..'\u09FF' }
-        val online = isNetworkAvailable()
-        val allVoices = runCatching { currentTts.voices }.getOrNull().orEmpty()
-        val installedBnVoice = allVoices.any { v ->
-            v.locale.language.equals("bn", ignoreCase = true) &&
-                !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) &&
-                (online || !v.isNetworkConnectionRequired)
+        if (text.isBlank()) return
+        val vault = keyVault
+        val geminiKey = vault?.getKey("gemini_api_key").orEmpty()
+        val elevenKey = vault?.getKey("elevenlabs_api_key").orEmpty()
+        vault?.let {
+            onlineVoiceEngine?.updateVoiceConfig(OnlineHumanVoiceCatalog.loadConfig(it))
         }
-
-        val textToSpeak: String
-        val targetLangPrefix: String
-        if (hasBengali && installedBnVoice) {
-            val bnLocale = listOf(Locale("bn", "BD"), Locale("bn", "IN"), Locale("bn")).firstOrNull { loc ->
-                runCatching { currentTts.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
-            }
-            if (bnLocale != null) {
-                currentTts.language = bnLocale
-                textToSpeak = clean
-                targetLangPrefix = "bn"
-            } else {
-                textToSpeak = BengaliToBanglish.toBanglish(clean)
-                currentTts.language = Locale.US
-                targetLangPrefix = "en"
-            }
-        } else {
-            textToSpeak = if (hasBengali) BengaliToBanglish.toBanglish(clean) else clean
-            val safeEn = listOf(Locale.US, Locale.UK, Locale("en", "IN"), Locale.getDefault()).firstOrNull { loc ->
-                runCatching { currentTts.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
-            } ?: Locale.getDefault()
-            currentTts.language = safeEn
-            targetLangPrefix = safeEn.language
-        }
-
-        currentTts.setPitch(if (isFemale) 1.12f else 0.92f)
-        currentTts.setSpeechRate(if (isFemale) 0.96f else 1.0f)
-
-        runCatching {
-            val pool = allVoices.filter { v ->
-                v.locale.language.equals(targetLangPrefix, ignoreCase = true) &&
-                    !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) &&
-                    (online || !v.isNetworkConnectionRequired)
-            }
-            val targetVoice = if (isFemale) {
-                pool.firstOrNull { it.name.contains("female", true) || it.name.contains("-f-", true) }
-            } else {
-                pool.firstOrNull { it.name.contains("male", true) || it.name.contains("-m-", true) }
-            } ?: pool.firstOrNull()
-            if (targetVoice != null) currentTts.voice = targetVoice
-        }
-
-        val uid = "fgs_${System.currentTimeMillis()}"
-        val params = Bundle().apply {
-            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
-            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, uid)
-        }
-
-        isTtsSpeaking = true
-        mainHandler.post { speechRecognizer?.cancel() }
-        val res = runCatching { currentTts.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, params, uid) }.getOrDefault(TextToSpeech.ERROR)
-        if (res != TextToSpeech.SUCCESS) {
-            isTtsSpeaking = false
-            scheduleRestart(300L)
-        }
+        onlineVoiceEngine?.speakHuman(
+            rawText = text,
+            persona = if (isFemale) VoicePersona.ZHEE_FEMALE else VoicePersona.ZEE_MALE,
+            isOnline = isNetworkAvailable(),
+            geminiApiKey = geminiKey,
+            elevenLabsApiKey = elevenKey
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -366,7 +297,7 @@ class WakeWordForegroundService : Service() {
                     return
                 }
             } else {
-                val greeting = if (targetChar == "zhee") "হ্যাঁ বলো, আমি শুনছি।" else "হ্যাঁ, বলো কী করব?"
+                val greeting = if (targetChar == "zhee") "হ্যাঁ বস, আমি শুনছি।" else "হ্যাঁ বস, বলুন কী করতে হবে?"
                 val nm = getSystemService(NotificationManager::class.java)
                 nm.notify(NOTIFICATION_ID, buildNotification("${targetChar.uppercase()}: $greeting"))
                 speakReply(greeting, isFemale = targetChar == "zhee")
@@ -414,8 +345,8 @@ class WakeWordForegroundService : Service() {
         destroyRecognizer()
         WakeWordEventBus.setRunning(false)
         WakeWordEventBus.setPaused(false)
-        tts?.shutdown()
-        tts = null
+        onlineVoiceEngine?.release()
+        onlineVoiceEngine = null
         super.onDestroy()
     }
 
