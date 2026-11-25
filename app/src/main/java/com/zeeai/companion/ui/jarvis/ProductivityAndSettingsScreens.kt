@@ -728,7 +728,7 @@ fun AutonomousCoreSettingsScreen(
             )
             LuxuryGlassSwitchTile(
                 title = "Neural Studio Human Voice",
-                subtitle = "Prioritize Sherpa-ONNX & ElevenLabs Neural voices for ZEE / ZHEE",
+                subtitle = "100% Online Human Voices via ElevenLabs, Gemini 2.5 Studio & Cloud Neural for ZEE / ZHEE",
                 checked = snap.useNeuralVoice,
                 onCheckedChange = { b -> jarvisCore.prefs.update { it.copy(useNeuralVoice = b) } },
                 accentColor = LuxuryPalette.ElectricCyan,
@@ -1167,7 +1167,7 @@ fun LuxuryOnboardingOverlay(
     val bodies = listOf(
         "Your luxury Obsidian Glass AI companion — engineered to listen cleanly, control every corner of your phone, and address you loyally as 'বস' (Boss).",
         "Switch effortlessly between Autonomous Agent, Fast Dual-Engine Chat, and the interactive 3D Arc Reactor / Hologram Suit HUD.",
-        "Run 100% offline with on-device Gemma + Sherpa-ONNX Neural Voices, or connect Gemini, DeepSeek, OpenAI, Groq & OpenRouter.",
+        "Run offline AI chat with on-device Gemma models, or connect Gemini, DeepSeek, OpenAI, Groq & ElevenLabs Studio Voices.",
         "Enable Microphone, Accessibility, Overlay & Notification bridges so ZEE can read screens, detect Air Gestures, and guard with Sentry."
     )
 
