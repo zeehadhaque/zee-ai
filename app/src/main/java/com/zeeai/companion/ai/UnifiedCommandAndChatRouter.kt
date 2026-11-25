@@ -72,7 +72,7 @@ class UnifiedCommandAndChatRouter(
         val systemPrompt = buildOnlineHumanSystemPrompt(config.persona, config.hermesPersonaDirective)
         val historyPairs = history.takeLast(6).map { (if (it.isUser) "user" else "model") to it.text }
 
-        // 3. Optional Custom OpenAI-Compatible Provider Preset (DeepSeek / OpenAI / NVIDIA / Ollama)
+        // 3. Optional Custom OpenAI-Compatible Provider Preset (DeepSeek / OpenAI / Groq / NVIDIA)
         val onlineResult = if (config.customProviderPreset != "gemini" && config.customBaseUrl.isNotBlank()) {
             val keyToUse = when (config.customProviderPreset) {
                 "groq" -> config.customApiKey.ifBlank { config.groqApiKey }
@@ -83,7 +83,7 @@ class UnifiedCommandAndChatRouter(
             val endpoint = if (base.endsWith("/chat/completions")) base else "$base/chat/completions"
             val customAttempt = geminiClient.executeOpenAiCompatibleChat(
                 endpointUrl = endpoint,
-                apiKey = keyToUse.ifEmpty { "ollama" },
+                apiKey = keyToUse,
                 model = config.selectedOnlineModel,
                 systemInstruction = systemPrompt,
                 history = historyPairs,
