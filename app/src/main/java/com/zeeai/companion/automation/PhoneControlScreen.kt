@@ -146,6 +146,7 @@ fun PhoneControlScreen(
             onRequestMic()
             return
         }
+        voiceController.clearError()
         // Release continuous recognizer first so system Google Voice Popup doesn't hit mic busy
         if (voiceController.isMicLockedOn.value) {
             voiceController.stopListening(resumeWakeWord = false)
@@ -153,22 +154,29 @@ fun PhoneControlScreen(
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, voiceProfile.languageTag)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, voiceProfile.languageTag)
-            putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("bn-BD", "en-US", "bn-IN"))
             putExtra(
                 RecognizerIntent.EXTRA_PROMPT,
                 if (activeCharId == "zhee") "ZHEE Phone Control — বলুন বস" else "ZEE Phone Control — কমান্ড বলুন বস"
             )
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
-        runCatching { phoneSpeechDialogLauncher.launch(intent) }
+        runCatching { phoneSpeechDialogLauncher.launch(intent) }.onFailure { err ->
+            actionLogs.add(
+                0,
+                PhoneActionLog(
+                    command = "Mic Popup",
+                    result = "⚠️ Google app voice popup unavailable (${err.localizedMessage ?: "Install/Enable Google App"})"
+                )
+            )
+        }
     }
 
     fun startPhoneControlMic() {
         liveVoiceText = ""
+        voiceController.clearError()
         voiceController.startContinuousListening(
             languageTag = voiceProfile.languageTag,
-            preferOffline = !isNetworkAvailable(),
+            preferOffline = false,
             onPartial = { liveVoiceText = it },
             onFinal = { spokenText ->
                 liveVoiceText = ""
@@ -176,7 +184,7 @@ fun PhoneControlScreen(
                     executePhoneCommand(spokenText)
                 }
             },
-            onError = { /* handled reactively by voiceController.lastError */ }
+            onError = { /* handled seamlessly via watchdog & Google Voice Popup fallback */ }
         )
     }
 
